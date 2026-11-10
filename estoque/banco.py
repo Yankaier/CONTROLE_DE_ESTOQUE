@@ -1,26 +1,103 @@
-"""Camada de acesso ao banco de dados SQLite."""
+"""Camada de acesso ao banco de dados SQLite.
+
+O modelo segue o app "Movimentação do Almoxarifado" (artefato do Claude), que
+grava na planilha CONTROLE DE ESTOQUES 2.0 do SharePoint:
+
+- itens:        estante, PT (prateleira), caixa, SKU, descrição, saldo, mínimo
+- seriais:      seriais/lotes em estoque de cada item
+- lancamentos:  Entrada, Saída ou Saldo Inicial, com solicitante, área, OS, NF,
+                empréstimo (devolver até), estorno e devolução
+- pedidos:      pedidos da montagem (P-001), com itens; pedido → separado → entregue
+- descartes:    descartes numerados (D-0001), do estoque ou de fora dele
+- pessoas:      quem retira material e de qual área
+"""
 
 import sqlite3
 from pathlib import Path
 
 ESQUEMA = """
-CREATE TABLE IF NOT EXISTS produtos (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo          TEXT    NOT NULL UNIQUE,
-    nome            TEXT    NOT NULL,
-    categoria       TEXT    NOT NULL DEFAULT 'Geral',
-    preco           REAL    NOT NULL DEFAULT 0 CHECK (preco >= 0),
-    quantidade      INTEGER NOT NULL DEFAULT 0 CHECK (quantidade >= 0),
-    estoque_minimo  INTEGER NOT NULL DEFAULT 0 CHECK (estoque_minimo >= 0)
+CREATE TABLE IF NOT EXISTS itens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    estante    TEXT    NOT NULL DEFAULT '-',
+    pt         TEXT    NOT NULL DEFAULT '-',
+    caixa      TEXT    NOT NULL DEFAULT '-',
+    sku        TEXT    NOT NULL DEFAULT '-',
+    descricao  TEXT    NOT NULL,
+    saldo      INTEGER NOT NULL DEFAULT 0,
+    minimo     INTEGER NOT NULL DEFAULT 0 CHECK (minimo >= 0),
+    criado_em  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE (estante, pt, caixa, sku, descricao)
 );
 
-CREATE TABLE IF NOT EXISTS movimentacoes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    produto_id  INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
-    tipo        TEXT    NOT NULL CHECK (tipo IN ('ENTRADA', 'SAIDA')),
-    quantidade  INTEGER NOT NULL CHECK (quantidade > 0),
-    observacao  TEXT    NOT NULL DEFAULT '',
-    data_hora   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+CREATE TABLE IF NOT EXISTS seriais (
+    item_id  INTEGER NOT NULL REFERENCES itens(id) ON DELETE CASCADE,
+    serial   TEXT    NOT NULL,
+    PRIMARY KEY (item_id, serial)
+);
+
+CREATE TABLE IF NOT EXISTS pessoas (
+    nome  TEXT PRIMARY KEY,
+    area  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS lancamentos (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    criado_em      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    data           TEXT    NOT NULL DEFAULT (date('now', 'localtime')),
+    movim          TEXT    NOT NULL CHECK (movim IN ('Entrada', 'Saída', 'Saldo Inicial')),
+    item_id        INTEGER NOT NULL REFERENCES itens(id) ON DELETE CASCADE,
+    qtd            INTEGER NOT NULL,
+    seriais        TEXT    NOT NULL DEFAULT '',   -- separados por vírgula
+    solicitante    TEXT    NOT NULL DEFAULT '',
+    area           TEXT    NOT NULL DEFAULT '',
+    os             TEXT    NOT NULL DEFAULT '',
+    nf             TEXT    NOT NULL DEFAULT '',
+    obs            TEXT    NOT NULL DEFAULT '',
+    status         TEXT    NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente', 'lancado')),
+    emprestimo     INTEGER NOT NULL DEFAULT 0,
+    devolver_ate   TEXT,
+    devolucao_de   INTEGER REFERENCES lancamentos(id),
+    devolvido_por  INTEGER REFERENCES lancamentos(id),
+    estorno_de     INTEGER REFERENCES lancamentos(id),
+    estornado_por  INTEGER REFERENCES lancamentos(id)
+);
+
+CREATE TABLE IF NOT EXISTS pedidos (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    num          TEXT    NOT NULL UNIQUE,
+    criado_em    TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    data         TEXT    NOT NULL DEFAULT (date('now', 'localtime')),
+    solicitante  TEXT    NOT NULL,
+    area         TEXT    NOT NULL DEFAULT '',
+    os           TEXT    NOT NULL DEFAULT '',
+    obs          TEXT    NOT NULL DEFAULT '',
+    status       TEXT    NOT NULL DEFAULT 'pedido'
+                 CHECK (status IN ('pedido', 'separado', 'entregue', 'cancelado')),
+    entregue_em  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pedido_itens (
+    pedido_id  INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+    item_id    INTEGER NOT NULL REFERENCES itens(id),
+    qtd        INTEGER NOT NULL CHECK (qtd > 0),
+    PRIMARY KEY (pedido_id, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS descartes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    num            TEXT    NOT NULL UNIQUE,
+    criado_em      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    data           TEXT    NOT NULL DEFAULT (date('now', 'localtime')),
+    modo           TEXT    NOT NULL CHECK (modo IN ('estoque', 'fora')),
+    item_id        INTEGER REFERENCES itens(id),
+    sku            TEXT    NOT NULL DEFAULT '-',
+    material       TEXT    NOT NULL,
+    seriais        TEXT    NOT NULL DEFAULT '',
+    qtd            INTEGER NOT NULL CHECK (qtd > 0),
+    motivo         TEXT    NOT NULL DEFAULT '',
+    destino        TEXT    NOT NULL DEFAULT '',
+    responsavel    TEXT    NOT NULL DEFAULT '',
+    lancamento_id  INTEGER REFERENCES lancamentos(id)
 );
 """
 

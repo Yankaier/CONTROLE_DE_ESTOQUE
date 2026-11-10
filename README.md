@@ -1,37 +1,87 @@
-# Controle de Estoque
+# Controle de Estoque — Almoxarifado
 
-Sistema de controle de estoque feito em **Python**, usando apenas a biblioteca padrão
-(banco de dados **SQLite** + interface de linha de comando). Não precisa instalar nada além do Python 3.10+.
+Sistema de controle de estoque em **Python** (só biblioteca padrão: **SQLite** + linha de comando).
+Não precisa instalar nada além do Python 3.10+.
 
-## Funcionalidades
+O projeto segue o mesmo modelo de dados e as mesmas regras do app **Movimentação do Almoxarifado**
+(artefato do Claude usado no balcão, que lança na planilha *CONTROLE DE ESTOQUES 2.0* do SharePoint).
+Ele lê o arquivo **Movimento do dia** baixado do app e gera arquivos no mesmo formato.
 
-- Cadastro, edição, busca e remoção de produtos
-- Registro de **entradas** e **saídas** com histórico de movimentações
-- Bloqueio de saída quando não há estoque suficiente
-- Alerta de produtos no **estoque mínimo** ou abaixo dele
-- Resumo geral: total de produtos, itens e valor do estoque
+## Como o projeto se liga ao app
+
+| No app (Movimentação do Almoxarifado)        | Neste projeto                                   |
+|----------------------------------------------|-------------------------------------------------|
+| Item: estante, PT, caixa, SKU, descrição     | tabela `itens`                                  |
+| Seriais / lotes em estoque                   | tabela `seriais`                                |
+| Entrada, Saída, Saldo Inicial                | tabela `lancamentos` (`movim`)                  |
+| Solicitante, Área, OS, NF, Observação        | colunas de `lancamentos`                        |
+| Pendente / Na planilha                       | `lancamentos.status` (`pendente` / `lancado`)   |
+| Empréstimo ("devolver até") e devolução      | `emprestimo`, `devolver_ate`, `devolvido_por`   |
+| Estorno                                      | `estorno_de`, `estornado_por`                   |
+| Pedidos da montagem (P-001)                  | tabelas `pedidos` e `pedido_itens`              |
+| Descarte (D-0001)                            | tabela `descartes`                              |
+| Pessoas (quem retira e de qual área)         | tabela `pessoas`                                |
+| Estoque mínimo                               | `itens.minimo`                                  |
+| Botão "Baixar" do Movimento do dia (.csv)    | `estoque importar` e `estoque dia --csv`        |
+
+### Regras iguais às do app
+
+- **Saldo** = soma dos lançamentos. *Saldo Inicial* é usado no cadastro e nos ajustes de contagem.
+- **Seriais**: o serial que entra fica em estoque e o que sai precisa estar em estoque. Num item com
+  seriais, é preciso dizer quais saíram. Bipar o serial já identifica o item e o serial.
+- **Saída maior que o saldo** é bloqueada, a não ser que se use `--forcar` ("lançar mesmo assim").
+- **Estoque mínimo**: alerta quando o mínimo é maior que 0 e o saldo está no mínimo ou abaixo.
+- **Empréstimo**: saída com data para devolver. Passou da data, aparece como atrasado.
+- **Estorno**: lança o movimento contrário e marca o original como estornado.
+- **Pedidos**: `pedido → separado → entregue` (a entrega gera as saídas) ou `cancelado`.
+- **Descarte do estoque** gera uma saída na área "Descarte".
 
 ## Como usar
 
 ```bash
-# Cadastrar produtos
-python -m estoque cadastrar P001 "Caneta Azul" --categoria Papelaria --preco 2.50 --minimo 10
-python -m estoque cadastrar P002 "Caderno 96 folhas" --categoria Papelaria --preco 15 --minimo 5
+# Cadastrar itens (com saldo inicial e seriais)
+python -m estoque cadastrar "Cabo de rede cat6" --sku CB-06 --estante 3 --pt PT2 --caixa 12 --minimo 5 --saldo 10
+python -m estoque cadastrar "Leitor de cartão" --sku LT-01 --estante 1 --pt PT1 --serial 818EZ001 --serial 818EZ002
 
-# Movimentar
-python -m estoque entrada P001 50 --obs "Compra fornecedor"
-python -m estoque saida P001 45 --obs "Entrega sala 3"
+# Movimentar (o item pode ser o id, o SKU ou um serial)
+python -m estoque saida CB-06 6 --solic LUAN --area Montagem --os 0042/26
+python -m estoque entrada CB-06 20 --solic "Fornecedor X" --area Fornecedor --nf 123
+python -m estoque saida 818EZ001 --solic ANA --emprestimo 2026-11-20
+python -m estoque devolver 4                  # nº do lançamento do empréstimo
+python -m estoque estornar 3 "lançado errado"
+python -m estoque contagem CB-06 23           # ajusta o saldo para o valor contado
 
-# Consultar
-python -m estoque listar
-python -m estoque listar papelaria      # filtra por nome, código ou categoria
-python -m estoque historico P001
+# Pedidos da montagem
+python -m estoque pedido novo LUAN CB-06:2 LT-01:1
+python -m estoque pedido listar
+python -m estoque pedido entregar P-001
+
+# Descarte
+python -m estoque descarte "queimado" --item LT-01 --serial 818EZ002 --resp JOAO
+
+# Consultas
+python -m estoque buscar cabo
+python -m estoque historico CB-06
+python -m estoque emprestimos
 python -m estoque alertas
 python -m estoque resumo
 ```
 
-Os dados ficam no arquivo `estoque.db` (use `--banco outro.db` para escolher outro arquivo).
-Veja todos os comandos com `python -m estoque --help`.
+### Trocar dados com o app
+
+```bash
+# No app: Mais ▸ Movimento do dia ▸ Baixar  →  "Movimento do dia 2026-11-10.csv"
+python -m estoque importar "Movimento do dia 2026-11-10.csv"
+
+# Gerar o mesmo arquivo a partir deste banco (abre no Excel)
+python -m estoque dia 2026-11-10 --csv "Movimento do dia 2026-11-10.csv"
+```
+
+A importação cria os itens que ainda não existem (pela estante, PT, caixa, SKU e descrição) e pula
+as linhas já importadas, então dá para importar o mesmo arquivo mais de uma vez.
+
+Os dados ficam em `estoque.db` (use `--banco outro.db` para escolher outro arquivo). O `.gitignore`
+não deixa o banco nem os CSVs irem para o GitHub, para que dados reais do almoxarifado não fiquem públicos.
 
 ## Testes
 
@@ -44,22 +94,16 @@ python -m unittest -v
 ```
 controle-de-estoque/
 ├── estoque/
-│   ├── banco.py     # conexão e criação das tabelas SQLite
-│   ├── servico.py   # regras de negócio (produtos, movimentações, relatórios)
-│   └── cli.py       # comandos de terminal
+│   ├── banco.py      # tabelas SQLite (mesmo modelo do app)
+│   ├── servico.py    # regras: itens, lançamentos, empréstimos, pedidos, descartes, relatórios
+│   ├── planilha.py   # importa/exporta o CSV "Movimento do dia" do app
+│   └── cli.py        # comandos de terminal
 └── tests/
     └── test_estoque.py
 ```
 
-## Banco de dados
-
-| Tabela          | Campos principais                                                      |
-|-----------------|------------------------------------------------------------------------|
-| `produtos`      | código, nome, categoria, preço, quantidade, estoque mínimo             |
-| `movimentacoes` | produto, tipo (ENTRADA/SAIDA), quantidade, observação, data e hora     |
-
 ## Próximos passos (ideias)
 
-- Interface web (Flask) ou gráfica (Tkinter)
-- Cadastro de fornecedores
-- Exportar relatórios em CSV/PDF
+- Interface web (Flask) com as mesmas abas do app
+- Ler direto a planilha CONTROLE DE ESTOQUES 2.0 (.xlsx)
+- Inventário por estante e relatório de consumo/compras
