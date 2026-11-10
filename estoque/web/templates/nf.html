@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% block conteudo %}
+<form class="panel" method="post">{{ m.csrf_field() }}
+  <h2>Receber nota fiscal</h2>
+  <div class="row3">
+    <div class="field"><label for="fornecedor">Fornecedor</label><input id="fornecedor" name="fornecedor" list="listaForn" required autocomplete="off"></div>
+    <div class="field"><label for="nfn">Número da nota</label><input id="nfn" name="nf" required inputmode="numeric"></div>
+    <div class="field"><label for="data">Data de entrada</label><input id="data" name="data" type="date" value="{{ hoje }}"></div>
+  </div>
+  <datalist id="listaForn">{% for f in fornecedores %}<option value="{{ f }}"></option>{% endfor %}</datalist>
+  <span class="lbl">Itens da nota</span>
+  <div id="linhasNf" class="field">
+    <div class="linha-item">
+      <div class="field"><label>Item (comece a digitar o nome, SKU ou local)</label><input name="item" list="listaItens" autocomplete="off"></div>
+      <div class="row2"><div class="field"><label>Quantidade</label><input name="qtd" type="number" min="1" inputmode="numeric"></div>
+      <div class="field"><label>Seriais (opcional, um por linha)</label><textarea name="seriais"></textarea></div></div>
+      <button type="button" class="linkbtn danger" data-remover-linha>Remover linha</button>
+    </div>
+  </div>
+  <button type="button" class="btn ghost" data-add-linha="linhasNf">+ Outro item da nota</button>
+  <div class="field"><label for="obs">Observação</label><input id="obs" name="obs"></div>
+  <div class="actions"><button class="btn">Registrar entrada da nota</button><a class="btn ghost" href="{{ url_for('mov', tipo='entrada') }}">Cancelar</a></div>
+  <p class="hint">Item que não está na lista? <a href="{{ url_for('item_novo') }}">Cadastre primeiro</a>.</p>
+</form>
+{{ m.lista_itens(itens) }}
+{% endblock %}

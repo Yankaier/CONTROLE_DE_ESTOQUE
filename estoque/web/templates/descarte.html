@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block conteudo %}
+<div class="grid">
+<form class="panel" method="post">{{ m.csrf_field() }}
+  <h2>Registrar descarte</h2>
+  <div class="actions"><label class="chk"><input type="radio" name="modo" value="estoque" checked> Do estoque</label><label class="chk"><input type="radio" name="modo" value="fora"> Fora do estoque</label></div>
+  <p class="hint">Tudo fica na aba DESCARTES da planilha. Descarte do estoque também dá baixa na Movimentação, com área Descarte.</p>
+  <div class="field" data-modo="estoque"><label for="item">Item do estoque</label><input id="item" name="item" list="listaItens" autocomplete="off"></div>
+  <div class="row2" data-modo="fora" hidden><div class="field"><label for="material">Material</label><input id="material" name="material"></div><div class="field"><label for="sku">SKU</label><input id="sku" name="sku"></div></div>
+  <div class="row2"><div class="field"><label for="qtd">Quantidade</label><input id="qtd" name="qtd" type="number" min="1" value="1"></div><div class="field"><label for="data">Data</label><input id="data" name="data" type="date" value="{{ hoje }}"></div></div>
+  <div class="field"><label for="seriais">Seriais / lote (um por linha)</label><textarea id="seriais" name="seriais"></textarea></div>
+  <div class="row2"><div class="field"><label for="motivo">Motivo</label><input id="motivo" name="motivo" required placeholder="Queimado, quebrado, obsoleto…"></div><div class="field"><label for="destino">Destino</label><input id="destino" name="destino" placeholder="Sucata, reciclagem, fornecedor…"></div></div>
+  <div class="row3"><div class="field"><label for="origem">Local de origem</label><input id="origem" name="origem"></div><div class="field"><label for="resp">Responsável</label><input id="resp" name="resp" list="listaPessoas" required></div><div class="field"><label for="autorizado">Autorizado por</label><input id="autorizado" name="autorizado"></div></div>
+  <div class="row2"><div class="field"><label for="documento">Documento / laudo</label><input id="documento" name="documento"></div><div class="field"><label for="obs">Observação</label><input id="obs" name="obs"></div></div>
+  <button class="btn">Registrar descarte</button>
+</form>
+<section class="panel"><h2>Descartes</h2>
+  <div class="log">{% for d in lista %}<div class="log-item"><span class="meta">{{ d.num }}</span><span>{{ d.qtd }} × {{ d.material }}</span><span class="chip {{ 'ok' if d.modo == 'estoque' else '' }}">{{ 'estoque' if d.modo == 'estoque' else 'fora' }}</span>
+  <span class="who">{{ m.data_br(d.data) }} · {{ d.motivo }}{% if d.destino %} · {{ d.destino }}{% endif %}{% if d.responsavel %} · {{ d.responsavel }}{% endif %}{% if d.seriais %} · {{ d.seriais }}{% endif %}</span></div>{% else %}<p class="hint">Nenhum descarte registrado.</p>{% endfor %}</div>
+</section>
+</div>
+{{ m.lista_itens(itens) }}{{ m.lista_pessoas(pessoas) }}
+{% endblock %}

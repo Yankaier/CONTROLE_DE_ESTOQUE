@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block conteudo %}
+<div class="grid">
+<section class="panel"><h2>Pessoas</h2><p class="hint">Quem retira material e de qual área. Quem aparece como solicitante entra aqui sozinho.</p>
+  <div class="tab-wrap"><table><thead><tr><th>Nome</th><th>Área</th><th></th></tr></thead><tbody>
+  {% for p in lista %}<tr><td><b>{{ p.nome }}</b></td><td><form method="post" class="actions">{{ m.csrf_field() }}<input type="hidden" name="nome" value="{{ p.nome }}"><input name="area" value="{{ p.area }}" list="listaAreas" style="width:auto;flex:1"><button class="btn ghost small">Salvar</button></form></td>
+  <td><form method="post">{{ m.csrf_field() }}<input type="hidden" name="remover" value="{{ p.nome }}"><button class="linkbtn danger" data-confirm="Remover {{ p.nome }}?">Remover</button></form></td></tr>
+  {% else %}<tr><td colspan="3" class="hint">Ninguém cadastrado ainda.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+<form class="panel" method="post">{{ m.csrf_field() }}<h2>Adicionar pessoa</h2>
+  <div class="field"><label for="nome">Nome</label><input id="nome" name="nome" required></div>
+  <div class="field"><label for="area">Área</label><input id="area" name="area" list="listaAreas"></div>
+  <button class="btn">Adicionar</button>
+</form>
+</div>
+{{ m.lista_areas(areas) }}
+{% endblock %}

@@ -1,0 +1,29 @@
+{% import "_m.html" as m with context %}<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block titulo %}Movimentação do Almoxarifado{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='estilo.css') }}">
+<script src="{{ url_for('static', filename='app.js') }}" defer></script></head>
+<body><div class="wrap">
+{% if pend is defined %}
+<header class="top">
+  <div><h1><a href="{{ url_for('inicio') }}">Movimentação do Almoxarifado</a></h1>
+  <p class="sub">Entradas e saídas lançadas na planilha {{ (planilha or 'CONTROLE DE ESTOQUES 2.0').split('/')[-1].split('\\')[-1] }}.</p></div>
+  <div class="sync">
+    {% if not planilha %}<a class="chip bad" href="{{ url_for('planilha') }}">Planilha não configurada</a>
+    {% elif pend_total %}<a class="chip warn" href="{{ url_for('planilha') }}">{{ pend_total }} pendente(s)</a>
+    <form method="post" action="{{ url_for('planilha') }}">{{ m.csrf_field() }}<input type="hidden" name="acao" value="enviar"><button class="btn ghost">Enviar à planilha</button></form>
+    {% else %}<a class="chip ok" href="{{ url_for('planilha') }}">Planilha em dia</a>{% endif %}
+    <form method="post" action="{{ url_for('sair') }}">{{ m.csrf_field() }}<button class="linkbtn">Sair</button></form>
+  </div>
+</header>
+<nav class="tabs" aria-label="Áreas">
+  {% for k, nome in ABAS %}<a href="{{ url_for(k) }}" class="{{ 'on' if aba == k }}">{{ nome }}{% if k == 'pedidos' and n_pedidos %}<span class="count">{{ n_pedidos }}</span>{% endif %}</a>{% endfor %}
+  {% set mais_on = aba in (MAIS|map('first')|list) %}
+  <details class="{{ 'on' if mais_on }}"><summary>{% if mais_on %}{% for k, nome in MAIS %}{% if k == aba %}{{ nome }}{% endif %}{% endfor %}{% else %}Mais{% endif %} ▾</summary>
+    <div class="menu">{% for k, nome in MAIS %}<a href="{{ url_for(k) }}" class="{{ 'on' if aba == k }}">{{ nome }}</a>{% endfor %}<a href="{{ url_for('planilha') }}" class="{{ 'on' if aba == 'planilha' }}">Planilha</a><a href="{{ url_for('trocar_senha') }}">Trocar senha</a></div>
+  </details>
+</nav>
+{% endif %}
+{% with msgs = get_flashed_messages(with_categories=true) %}{% for cat, msg in msgs %}<div class="alert {{ cat }}" role="status">{{ msg }}</div>{% endfor %}{% endwith %}
+{% block conteudo %}{% endblock %}
+</div></body></html>

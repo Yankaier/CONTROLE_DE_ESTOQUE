@@ -14,11 +14,17 @@ As regras seguem o app "Movimentação do Almoxarifado":
 - Descartes: D-0001…; do estoque gera uma saída na área "Descarte".
 """
 
+import json
+import math
 import sqlite3
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 MOVIMENTOS = ("Entrada", "Saída", "Saldo Inicial")
+CHAVE = ("estante", "pt", "caixa", "sku", "descricao")   # identifica o item na planilha
+CHECKLIST_TERMINAL = ["Gabinete sem avarias", "Monitor / touch funcionando", "Noteiro", "Impressora",
+                      "Fonte", "Placa / game", "Cabos e conectores", "Chaves", "Lacres",
+                      "Teste de funcionamento"]
 
 
 class ErroEstoque(Exception):
@@ -36,6 +42,8 @@ class Item:
     saldo: int
     minimo: int
     criado_em: str
+    na_planilha: int
+    linha_contagem: int | None
     seriais: list[str]
 
     @property
@@ -148,9 +156,17 @@ class Almoxarifado:
         for k in ("sku", "estante", "pt", "caixa"):
             if k in campos:
                 campos[k] = _txt(campos[k])
+        muda_chave = any(campos.get(k, getattr(it, k)) != getattr(it, k) for k in CHAVE)
         sets = ", ".join(f"{k} = ?" for k in campos)
-        with self.db:
-            self.db.execute(f"UPDATE itens SET {sets} WHERE id = ?", (*campos.values(), it.id))
+        try:
+            with self.db:
+                if muda_chave and it.na_planilha:
+                    # guarda como o item está na planilha (só a primeira vez) para corrigir no envio
+                    self.db.execute("INSERT OR IGNORE INTO correcoes (item_id, de) VALUES (?, ?)",
+                                    (it.id, json.dumps({k: getattr(it, k) for k in CHAVE})))
+                self.db.execute(f"UPDATE itens SET {sets} WHERE id = ?", (*campos.values(), it.id))
+        except sqlite3.IntegrityError:
+            raise ErroEstoque("Já existe outro item com esse mesmo local e descrição.") from None
         return self.item(it.id)
 
     # ================= Lançamentos =================
@@ -374,7 +390,9 @@ class Almoxarifado:
     # ================= Descartes =================
 
     def descartar(self, motivo: str, responsavel: str, qtd: int | None = None, ref=None,
-                  material: str = "", sku: str = "-", seriais=None, destino: str = "") -> dict:
+                  material: str = "", sku: str = "-", seriais=None, destino: str = "",
+                  origem: str = "", autorizado: str = "", documento: str = "", obs: str = "",
+                  data: str | None = None) -> dict:
         """Com `ref` descarta do estoque (gera saída); sem `ref`, registra material de fora."""
         seriais = _lista_seriais(seriais)
         qtd = qtd if qtd is not None else (len(seriais) or 1)
@@ -383,17 +401,19 @@ class Almoxarifado:
         if ref is not None:
             it = self.item(ref)
             item_id, material, sku = it.id, it.descricao, it.sku
-            obs = " · ".join(x for x in (f"Descarte {num}", motivo.strip(), destino.strip()) if x)
+            obs_l = " · ".join(x for x in (f"Descarte {num}", motivo.strip(), destino.strip()) if x)
             lid = self.saida(it.id, qtd, seriais, solicitante=responsavel or "-", area="Descarte",
-                             obs=obs)["id"]
+                             nf=documento, obs=obs_l, data=data)["id"]
         elif not _txt(material, ""):
             raise ErroEstoque("Informe o material descartado.")
         with self.db:
             self.db.execute(
-                "INSERT INTO descartes (num, modo, item_id, sku, material, seriais, qtd, motivo, destino,"
-                " responsavel, lancamento_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (num, "estoque" if item_id else "fora", item_id, _txt(sku), material.strip().upper(),
-                 ", ".join(seriais), qtd, motivo.strip(), destino.strip(), responsavel.strip().upper(), lid))
+                "INSERT INTO descartes (num, data, modo, item_id, sku, material, seriais, qtd, motivo, destino,"
+                " responsavel, origem, autorizado, documento, obs, lancamento_id)"
+                " VALUES (?, COALESCE(?, date('now','localtime')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (num, data, "estoque" if item_id else "fora", item_id, _txt(sku), material.strip().upper(),
+                 ", ".join(seriais), qtd, motivo.strip(), destino.strip(), responsavel.strip().upper(),
+                 origem.strip(), autorizado.strip(), documento.strip(), obs.strip(), lid))
         return dict(self.db.execute("SELECT * FROM descartes WHERE num = ?", (num,)).fetchone())
 
     # ================= Relatórios =================
@@ -425,3 +445,189 @@ class Almoxarifado:
             "pedidos_abertos": len(self.pedidos(abertos=True)),
             "emprestimos_atrasados": len(self.emprestimos_atrasados()),
         }
+
+    # ================= Lançamentos pendentes =================
+
+    def excluir_lancamento(self, lid: int) -> None:
+        """Apaga um lançamento que ainda não foi para a planilha e refaz o saldo do item."""
+        l = self.lancamento(lid)
+        if l["status"] != "pendente":
+            raise ErroEstoque("Esse lançamento já está na planilha: use o estorno.")
+        ligados = self.db.execute(
+            "SELECT 1 FROM lancamentos WHERE estorno_de = ? OR devolucao_de = ?", (lid, lid)).fetchone()
+        if ligados or self.db.execute("SELECT 1 FROM descartes WHERE lancamento_id = ?", (lid,)).fetchone():
+            raise ErroEstoque("Esse lançamento tem estorno, devolução ou descarte ligado a ele.")
+        with self.db:
+            self.db.execute("UPDATE lancamentos SET estornado_por = NULL WHERE estornado_por = ?", (lid,))
+            self.db.execute("UPDATE lancamentos SET devolvido_por = NULL WHERE devolvido_por = ?", (lid,))
+            self.db.execute("DELETE FROM lancamentos WHERE id = ?", (lid,))
+        self.recalcular_saldos(l["item_id"])
+
+    def recalcular_saldos(self, item_id: int | None = None) -> None:
+        """Refaz saldo e seriais em estoque a partir dos lançamentos."""
+        ids = [item_id] if item_id else [r[0] for r in self.db.execute("SELECT id FROM itens")]
+        with self.db:
+            for iid in ids:
+                saldo, contagem = 0, {}
+                for movim, qtd, seriais in self.db.execute(
+                        "SELECT movim, qtd, seriais FROM lancamentos WHERE item_id = ? ORDER BY criado_em, id", (iid,)):
+                    sinal = -1 if movim == "Saída" else 1
+                    saldo += sinal * qtd
+                    for s in _lista_seriais(seriais):
+                        contagem[s] = contagem.get(s, 0) + (sinal if movim != "Saldo Inicial" or qtd > 0 else -1)
+                self.db.execute("UPDATE itens SET saldo = ? WHERE id = ?", (saldo, iid))
+                self.db.execute("DELETE FROM seriais WHERE item_id = ?", (iid,))
+                self.db.executemany("INSERT INTO seriais VALUES (?, ?)",
+                                    [(iid, s) for s, n in contagem.items() if n > 0])
+
+    def pendentes(self) -> dict:
+        um = lambda sql: self.db.execute(sql).fetchone()[0]
+        return {
+            "lancamentos": um("SELECT COUNT(*) FROM lancamentos WHERE status = 'pendente'"),
+            "itens_novos": um("SELECT COUNT(*) FROM itens WHERE na_planilha = 0"),
+            "correcoes": um("SELECT COUNT(*) FROM correcoes"),
+        }
+
+    # ================= Pessoas =================
+
+    def pessoas(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM pessoas ORDER BY nome")]
+
+    def salvar_pessoa(self, nome: str, area: str = "") -> None:
+        nome = _txt(nome, "").upper()
+        if not nome:
+            raise ErroEstoque("Informe o nome.")
+        with self.db:
+            self.db.execute("INSERT INTO pessoas (nome, area) VALUES (?, ?)"
+                            " ON CONFLICT(nome) DO UPDATE SET area = excluded.area", (nome, area.strip()))
+
+    def remover_pessoa(self, nome: str) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM pessoas WHERE nome = ?", (nome,))
+
+    def areas(self) -> list[str]:
+        base = ["Montagem", "OPERADOR", "Manutenção", "Fornecedor"]
+        extras = [r[0] for r in self.db.execute(
+            "SELECT DISTINCT area FROM pessoas WHERE area != '' UNION SELECT DISTINCT area FROM lancamentos"
+            " WHERE area NOT IN ('', 'Estoque Inicial', 'Ajuste de inventário', 'Descarte')")]
+        return base + sorted(a for a in set(extras) if a not in base)
+
+    # ================= Terminais =================
+
+    def registrar_terminal(self, tipo: str, serial: str, checklist: dict, modelo="", local="",
+                           responsavel="", obs="") -> dict:
+        if tipo not in ("Entrada", "Saída"):
+            raise ErroEstoque("Tipo deve ser Entrada ou Saída.")
+        serial = _txt(serial, "").upper()
+        if not serial:
+            raise ErroEstoque("Informe o serial do terminal.")
+        defeitos = sum(1 for v in checklist.values() if v == "Defeito")
+        with self.db:
+            cur = self.db.execute(
+                "INSERT INTO terminais (tipo, serial, modelo, local, responsavel, obs, checklist, defeitos)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (tipo, serial, modelo.strip(), local.strip(), responsavel.strip().upper(), obs.strip(),
+                 json.dumps(checklist, ensure_ascii=False), defeitos))
+        return self.terminais(id_=cur.lastrowid)[0]
+
+    def terminais(self, busca: str = "", id_: int | None = None, limite: int = 100) -> list[dict]:
+        if id_:
+            linhas = self.db.execute("SELECT * FROM terminais WHERE id = ?", (id_,))
+        else:
+            t = f"%{busca.strip()}%"
+            linhas = self.db.execute(
+                "SELECT * FROM terminais WHERE serial LIKE ? OR modelo LIKE ? OR local LIKE ?"
+                " ORDER BY id DESC LIMIT ?", (t, t, t, limite))
+        saida = []
+        for r in linhas:
+            d = dict(r)
+            d["checklist"] = json.loads(d["checklist"] or "{}")
+            saida.append(d)
+        return saida
+
+    # ================= Inventário =================
+
+    def estantes(self) -> list[str]:
+        vals = [r[0] for r in self.db.execute("SELECT DISTINCT estante FROM itens")]
+        return sorted(vals, key=lambda v: (not v.isdigit(), int(v) if v.isdigit() else 0, v))
+
+    def itens_da_estante(self, estante: str) -> list[Item]:
+        linhas = self.db.execute("SELECT * FROM itens WHERE estante = ? ORDER BY pt, caixa, descricao",
+                                 (estante,)).fetchall()
+        return [self._montar(l) for l in linhas]
+
+    def aplicar_inventario(self, estante: str, contagens: dict[int, int], responsavel: str = "") -> list[dict]:
+        """contagens: {item_id: quantidade contada}. Gera ajustes só onde há diferença."""
+        total = len(self.itens_da_estante(estante))
+        ajustes = [a for iid, n in contagens.items()
+                   if (a := self.ajustar_contagem(iid, n, solicitante=responsavel or "Inventário"))]
+        with self.db:
+            self.db.execute("INSERT INTO inventarios (local, contados, total, ajustes) VALUES (?, ?, ?, ?)",
+                            (f"Estante {estante}", len(contagens), total, len(ajustes)))
+        return ajustes
+
+    def inventarios(self, limite: int = 20) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM inventarios ORDER BY id DESC LIMIT ?", (limite,))]
+
+    # ================= Relatórios =================
+
+    def relatorio(self, dias: int = 30, prazo: int = 14) -> dict:
+        """Consumo, previsão de falta, mínimo sugerido e lista de compras (mesma conta do app)."""
+        inicio = (date.today() - timedelta(days=dias)).isoformat()
+        saidas = self.db.execute(
+            "SELECT l.item_id, l.area, l.solicitante, l.qtd, substr(l.data, 1, 7) AS mes, l.data FROM lancamentos l"
+            " WHERE l.movim = 'Saída' AND l.area NOT IN ('Ajuste de inventário') AND l.estorno_de IS NULL"
+            " AND l.estornado_por IS NULL").fetchall()
+        no_periodo = [s for s in saidas if s["data"] >= inicio]
+        def somar(chave):
+            tot = {}
+            for s in no_periodo:
+                k = s[chave] or "—"
+                tot[k] = tot.get(k, 0) + s["qtd"]
+            return sorted(tot.items(), key=lambda x: -x[1])
+        por_item = dict(somar("item_id"))
+        meses = {}
+        for s in saidas:
+            meses[s["mes"]] = meses.get(s["mes"], 0) + s["qtd"]
+        linhas = []
+        for it in self.buscar():
+            cons = por_item.get(it.id, 0)
+            diario = cons / dias
+            cobertura = it.saldo / diario if diario > 0 else math.inf
+            sugerido = math.ceil(diario * prazo) if diario > 0 else 0
+            linhas.append({"item": it, "consumo": cons, "diario": diario, "cobertura": cobertura,
+                           "sugerido": sugerido})
+        zerando = sorted((x for x in linhas if x["consumo"] > 0 and x["cobertura"] <= 21),
+                         key=lambda x: x["cobertura"])
+        min_sug = sorted((x for x in linhas if x["sugerido"] > 0 and x["sugerido"] != x["item"].minimo),
+                         key=lambda x: -x["consumo"])
+        compras = []
+        for x in linhas:
+            if x["item"].abaixo_do_minimo or (x["consumo"] > 0 and x["cobertura"] <= prazo):
+                x = dict(x, comprar=max(1, max(x["sugerido"], x["item"].minimo) * 2 - x["item"].saldo))
+                compras.append(x)
+        compras.sort(key=lambda x: x["cobertura"])
+        nomes = {it.id: it.descricao for it in self.buscar()}
+        return {
+            "dias": dias, "prazo": prazo,
+            "total": sum(s["qtd"] for s in no_periodo),
+            "por_area": somar("area")[:10],
+            "por_pessoa": somar("solicitante")[:10],
+            "por_item": [(nomes.get(k, "?"), v) for k, v in list(por_item.items())[:15]],
+            "meses": sorted(meses.items())[-6:],
+            "zerando": zerando, "minimo_sugerido": min_sug, "compras": compras,
+        }
+
+    # ================= Configuração =================
+
+    def config(self, chave: str, padrao: str | None = None) -> str | None:
+        r = self.db.execute("SELECT valor FROM config WHERE chave = ?", (chave,)).fetchone()
+        return r[0] if r else padrao
+
+    def definir_config(self, chave: str, valor: str | None) -> None:
+        with self.db:
+            if valor is None:
+                self.db.execute("DELETE FROM config WHERE chave = ?", (chave,))
+            else:
+                self.db.execute("INSERT INTO config VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
+                                (chave, valor))

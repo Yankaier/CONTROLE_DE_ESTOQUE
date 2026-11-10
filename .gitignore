@@ -5,3 +5,6 @@ __pycache__/
 .vscode/
 .idea/
 *.csv
+planilha/
+backups-estoque/
+*.xlsx

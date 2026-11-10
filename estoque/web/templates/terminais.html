@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block conteudo %}
+<div class="grid">
+<form class="panel" method="post">{{ m.csrf_field() }}
+  <h2>Checklist de terminal</h2>
+  <div class="actions"><label class="chk"><input type="radio" name="tipo" value="Entrada" checked> Entrada</label><label class="chk"><input type="radio" name="tipo" value="Saída"> Saída</label></div>
+  <div class="row2"><div class="field"><label for="serial">Serial do terminal</label><input id="serial" name="serial" required autofocus></div><div class="field"><label for="modelo">Modelo</label><input id="modelo" name="modelo"></div></div>
+  <div class="row2"><div class="field"><label for="local">Local / cliente</label><input id="local" name="local"></div><div class="field"><label for="resp">Responsável</label><input id="resp" name="resp"></div></div>
+  <div class="check-grid">
+    {% for c in checklist %}<div class="check-row"><span>{{ c }}</span><span class="opts">
+      <label><input type="radio" name="ck_{{ loop.index0 }}" value="OK" checked> OK</label>
+      <label><input type="radio" name="ck_{{ loop.index0 }}" value="Defeito"> Defeito</label>
+      <label><input type="radio" name="ck_{{ loop.index0 }}" value="N/A"> N/A</label></span></div>{% endfor %}
+  </div>
+  <div class="field"><label for="obs">Observação</label><textarea id="obs" name="obs"></textarea></div>
+  <button class="btn">Salvar checklist</button>
+</form>
+<section class="panel"><h2>Checklists salvos</h2>
+  <form method="get" class="actions"><input name="q" value="{{ q }}" type="search" placeholder="Serial, modelo ou local" style="flex:1"><button class="btn ghost">Procurar</button></form>
+  <div class="log">{% for t in lista %}<div class="log-item"><span class="chip {{ 'ok' if t.tipo == 'Entrada' else 'warn' }}">{{ t.tipo }}</span><span><b>{{ t.serial }}</b> {{ t.modelo }}</span>{% if t.defeitos %}<span class="chip bad">{{ t.defeitos }} defeito(s)</span>{% else %}<span></span>{% endif %}
+    <span class="who">{{ t.criado_em[:16] }}{% if t.local %} · {{ t.local }}{% endif %}{% if t.responsavel %} · {{ t.responsavel }}{% endif %}{% for k, v in t.checklist.items() if v == 'Defeito' %} · ✗ {{ k }}{% endfor %}{% if t.obs %} · {{ t.obs }}{% endif %}</span></div>
+  {% else %}<p class="hint">Os checklists salvos aparecem aqui.</p>{% endfor %}</div>
+</section>
+</div>
+{% endblock %}

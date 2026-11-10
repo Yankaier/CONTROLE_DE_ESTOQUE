@@ -125,6 +125,15 @@ def criar_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("importar", help="importa o CSV 'Movimento do dia' baixado do app")
     p.add_argument("arquivo", nargs="+")
 
+    p = sub.add_parser("planilha", help="troca dados com a planilha CONTROLE DE ESTOQUES 2.0 (.xlsx)")
+    p.add_argument("acao", choices=["trazer", "enviar"])
+    p.add_argument("arquivo", help="caminho do .xlsx")
+
+    p = sub.add_parser("web", help="abre a versão web (privada, com senha)")
+    p.add_argument("--porta", type=int, default=5000)
+    p.add_argument("--rede", action="store_true",
+                   help="aceita acesso de outros aparelhos da rede (celular/tablet); continua pedindo senha")
+
     sub.add_parser("alertas", help="itens no mínimo ou abaixo e empréstimos atrasados")
     sub.add_parser("resumo", help="resumo geral")
     return parser
@@ -213,6 +222,17 @@ def executar(alm: Almoxarifado, a) -> None:
                 r = importar_dia(alm, arq)
                 print(f"{arq}: {r['importados']} importado(s), {r['repetidos']} já existiam, "
                       f"{r['itens_novos']} item(ns) novo(s).")
+        case "planilha":
+            from .sincronizar import enviar_para_planilha, trazer_da_planilha
+            if a.acao == "trazer":
+                with open(a.arquivo, "rb") as f:
+                    r = trazer_da_planilha(alm, f.read())
+                print(f"{r['itens_novos']} item(ns) novo(s), {r['movimentos']} linha(s) de movimentação, "
+                      f"{r['descartes']} descarte(s) trazidos.")
+            else:
+                r = enviar_para_planilha(alm, a.arquivo)
+                print(f"{r['lancamentos']} lançamento(s) em {r['linhas']} linha(s), {r['itens_novos']} item(ns) novo(s), "
+                      f"{r['correcoes']} correção(ões), {r['descartes']} descarte(s) na planilha.")
         case "alertas":
             print("== No estoque mínimo ou abaixo ==")
             imprimir_itens(alm.abaixo_do_minimo())
@@ -228,12 +248,34 @@ def executar(alm: Almoxarifado, a) -> None:
             print(f"Empréstimos atrasados:  {r['emprestimos_atrasados']}")
 
 
+def iniciar_web(args) -> int:
+    try:
+        from .web import criar_app
+    except ImportError:
+        print("A versão web precisa do Flask. Instale com:  pip install -r requirements.txt", file=sys.stderr)
+        return 1
+    app = criar_app(args.banco, rede=args.rede)
+    host = "0.0.0.0" if args.rede else "127.0.0.1"
+    print(f"Abra no navegador: http://127.0.0.1:{args.porta}")
+    if args.rede:
+        print("Modo rede ligado: outros aparelhos da mesma rede podem abrir pelo IP deste computador (com senha).")
+    app.run(host=host, port=args.porta, debug=False)
+    return 0
+
+
 def main(argv=None) -> int:
     args = criar_parser().parse_args(argv)
+    if args.comando == "web":
+        return iniciar_web(args)
     conexao = conectar(args.banco)
     try:
         executar(Almoxarifado(conexao), args)
     except ErroEstoque as erro:
+        print(f"Erro: {erro}", file=sys.stderr)
+        return 1
+    except Exception as erro:
+        if type(erro).__name__ != "ErroPlanilha":
+            raise
         print(f"Erro: {erro}", file=sys.stderr)
         return 1
     finally:

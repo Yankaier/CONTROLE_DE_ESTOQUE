@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block titulo %}Entrar · Almoxarifado{% endblock %}
+{% block conteudo %}
+<form class="panel login-box" method="post">{{ m.csrf_field() }}
+  <h2>Movimentação do Almoxarifado</h2>
+  <p class="hint">Acesso privado. Digite a sua senha.</p>
+  {% if erro %}<div class="alert bad">{{ erro }}</div>{% endif %}
+  <input type="hidden" name="proximo" value="{{ proximo }}">
+  <div class="field"><label for="senha">Senha</label><input id="senha" name="senha" type="password" autocomplete="current-password" autofocus required></div>
+  <button class="btn">Entrar</button>
+</form>
+{% endblock %}

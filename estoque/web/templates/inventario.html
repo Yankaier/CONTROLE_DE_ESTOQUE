@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block conteudo %}
+<section class="panel">
+  <h2>Conferir / inventário</h2>
+  <form method="get" class="actions">
+    <div class="field"><label for="estante">Estante</label><select id="estante" name="estante">{% for e in estantes %}<option value="{{ e }}" {{ 'selected' if e == estante }}>Estante {{ e }}</option>{% endfor %}</select></div>
+    <button class="btn ghost">Abrir estante</button>
+  </form>
+  {% if estante %}
+  <form method="post">{{ m.csrf_field() }}<input type="hidden" name="estante" value="{{ estante }}">
+    <p class="hint">Digite o que você contou. Deixe em branco o que não conferiu. Só os itens com diferença geram ajuste de saldo (linha "Saldo Inicial" na área "Ajuste de inventário").</p>
+    <div class="tab-wrap"><table><thead><tr><th>PT</th><th>Caixa</th><th>SKU</th><th>Item</th><th class="n">No sistema</th><th class="n">Contado</th></tr></thead><tbody>
+    {% for i in itens %}<tr><td>{{ i.pt }}</td><td>{{ i.caixa }}</td><td class="meta">{{ i.sku }}</td><td>{{ i.descricao }}{% if i.seriais %}<div class="meta">{{ i.seriais|join(', ') }}</div>{% endif %}</td><td class="n">{{ i.saldo }}</td><td class="n"><input name="c_{{ i.id }}" type="number" min="0" inputmode="numeric" style="width:90px"></td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="actions"><div class="field"><label for="resp">Quem contou</label><input id="resp" name="resp"></div><button class="btn" data-confirm="Aplicar os ajustes de saldo desta contagem?">Aplicar contagem</button></div>
+  </form>
+  {% endif %}
+  {% if historico %}<h3>Contagens anteriores</h3>
+  <div class="tab-wrap"><table><thead><tr><th>Quando</th><th>Local</th><th class="n">Contados</th><th class="n">Itens</th><th class="n">Ajustes</th></tr></thead><tbody>
+  {% for h in historico %}<tr><td>{{ h.criado_em[:16] }}</td><td>{{ h.local }}</td><td class="n">{{ h.contados }}</td><td class="n">{{ h.total }}</td><td class="n">{{ h.ajustes }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+</section>
+{% endblock %}

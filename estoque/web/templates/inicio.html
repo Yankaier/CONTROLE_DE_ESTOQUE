@@ -1,0 +1,43 @@
+{% extends "base.html" %}{% block conteudo %}
+<section class="panel">
+  <div class="actions" style="justify-content:space-between">
+    <div><h2>O que você vai fazer agora?</h2><p class="hint">{% if usuario %}{{ usuario }} · {% endif %}{{ m.data_br(hoje) }}</p></div>
+  </div>
+  <form method="get" action="{{ url_for('mov') }}" class="actions">
+    <input name="q" type="search" placeholder="Procurar um item: nome, SKU, serial ou estante (ou bipe o código)" autofocus style="flex:1">
+    <button class="btn">Procurar</button>
+  </form>
+  {% if minimo or atrasados or n_pedidos or pend_total %}
+  <div class="actions">
+    {% if minimo %}<a class="chip warn" href="{{ url_for('mov', f='minimo') }}">{{ minimo|length }} item(ns) no mínimo ou abaixo</a>{% endif %}
+    {% if atrasados %}<a class="chip bad" href="{{ url_for('pedidos') }}#emprestimos">{{ atrasados|length }} empréstimo(s) atrasado(s)</a>{% endif %}
+    {% if n_pedidos %}<a class="chip" href="{{ url_for('pedidos') }}">{{ n_pedidos }} pedido(s) da montagem aguardando</a>{% endif %}
+    {% if pend_total %}<a class="chip warn" href="{{ url_for('planilha') }}">{{ pend_total }} registro(s) ainda não estão na planilha</a>{% endif %}
+  </div>
+  {% endif %}
+</section>
+<h3>Do dia a dia</h3>
+<div class="home-grid">
+  <a class="tile out" href="{{ url_for('mov', tipo='saida') }}"><b>Saída de material</b><span>Para montagem, manutenção ou operador.</span></a>
+  <a class="tile in" href="{{ url_for('mov', tipo='entrada') }}"><b>Entrada de material</b><span>Devolução, sobra ou material que chegou.</span></a>
+  <a class="tile in" href="{{ url_for('receber_nf') }}"><b>Receber nota fiscal</b><span>Vários itens de uma NF de uma vez.</span></a>
+  <a class="tile" href="{{ url_for('pedidos') }}"><b>Pedidos da montagem{% if n_pedidos %}<span class="badge">{{ n_pedidos }}</span>{% endif %}</b><span>Separar e entregar pedidos, empréstimos.</span></a>
+  <a class="tile" href="{{ url_for('inventario') }}"><b>Conferir / inventário</b><span>Contar uma estante e ajustar o saldo.</span></a>
+  <a class="tile" href="{{ url_for('planilha') }}"><b>Planilha</b><span>Enviar pendentes, trazer o que mudou, baixar cópia.</span></a>
+</div>
+<h3>Outros</h3>
+<div class="home-grid small">
+  <a class="tile" href="{{ url_for('item_novo') }}"><b>Cadastrar item novo</b><span>Produto que ainda não existe.</span></a>
+  <a class="tile" href="{{ url_for('terminais') }}"><b>Terminais</b><span>Checklist de entrada e saída.</span></a>
+  <a class="tile" href="{{ url_for('descarte') }}"><b>Descarte</b><span>Itens com defeito para descartar.</span></a>
+  <a class="tile" href="{{ url_for('dia') }}"><b>Movimento do dia</b><span>Tudo o que entrou e saiu num dia.</span></a>
+  <a class="tile" href="{{ url_for('relatorios') }}"><b>Relatórios e compras</b><span>Consumo, mínimo e lista de compras.</span></a>
+  <a class="tile" href="{{ url_for('pessoas') }}"><b>Pessoas</b><span>Quem retira e de qual área.</span></a>
+</div>
+<div class="cards">
+  <div class="card"><span class="n">{{ resumo.itens }}</span><span class="l">itens</span></div>
+  <div class="card"><span class="n">{{ resumo.unidades }}</span><span class="l">unidades em estoque</span></div>
+  <div class="card"><span class="n">{{ resumo.zerados }}</span><span class="l">zerados</span></div>
+  <div class="card out"><span class="n">{{ resumo.abaixo_do_minimo }}</span><span class="l">no mínimo</span></div>
+</div>
+{% endblock %}

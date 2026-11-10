@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block conteudo %}
+<form class="panel" method="post">{{ m.csrf_field() }}
+  <div class="actions" style="justify-content:space-between"><h2>Corrigir item #{{ item.id }}</h2><a class="linkbtn" href="{{ url_for('mov', item=item.id) }}">Voltar</a></div>
+  {% if item.na_planilha %}<p class="hint">Mudanças de local, SKU ou descrição também são aplicadas na planilha (Contagem e Movimentação) no próximo envio.</p>{% endif %}
+  <div class="field"><label for="descricao">Descrição</label><input id="descricao" name="descricao" value="{{ item.descricao }}" required></div>
+  <div class="row4">
+    <div class="field"><label for="estante">Estante</label><input id="estante" name="estante" list="listaEst" value="{{ item.estante }}"></div>
+    <div class="field"><label for="pt">PT</label><input id="pt" name="pt" value="{{ item.pt }}"></div>
+    <div class="field"><label for="caixa">Caixa</label><input id="caixa" name="caixa" value="{{ item.caixa }}"></div>
+    <div class="field"><label for="sku">SKU</label><input id="sku" name="sku" value="{{ item.sku }}"></div>
+  </div>
+  <div class="row2">
+    <div class="field"><label for="minimo">Estoque mínimo (0 = sem alerta)</label><input id="minimo" name="minimo" type="number" min="0" value="{{ item.minimo }}"></div>
+    <div class="field"><label for="contado">Saldo contado (deixe vazio para não mexer; hoje: {{ item.saldo }})</label><input id="contado" name="contado" type="number"></div>
+  </div>
+  <button class="btn">Salvar correção</button>
+</form>
+<datalist id="listaEst">{% for e in estantes %}<option value="{{ e }}"></option>{% endfor %}</datalist>
+{% endblock %}

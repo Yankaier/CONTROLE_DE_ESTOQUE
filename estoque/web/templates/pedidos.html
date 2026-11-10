@@ -1,0 +1,52 @@
+{% extends "base.html" %}{% block conteudo %}
+<div class="grid">
+<section class="panel">
+  <div class="actions" style="justify-content:space-between"><div><h2>Pedidos da montagem</h2><p class="hint">Pedido → Separado → Entregue. O estoque só baixa na entrega.</p></div></div>
+  <div class="filtros">{% for k, n in [('abertos','Abertos'),('entregue','Entregues'),('cancelado','Cancelados'),('todos','Todos')] %}<a href="{{ url_for('pedidos', f=k) }}" class="{{ 'on' if filtro == k }}">{{ n }}</a>{% endfor %}</div>
+  {% for p in lista %}
+  <div class="ped-card">
+    <div class="ped-head"><b>{{ p.num }}</b><span>{{ p.solicitante }}{% if p.area %} · {{ p.area }}{% endif %}</span>
+      <span class="chip {{ {'pedido':'warn','separado':'warn','entregue':'ok','cancelado':'bad'}[p.status] }}">{{ p.status }}</span><span class="meta">{{ m.data_br(p.data) }}{% if p.os %} · OS {{ p.os }}{% endif %}</span></div>
+    <ul>{% for it in p['itens'] %}<li>{{ it.qtd }} × {{ it.descricao }} <span class="meta">(saldo {{ it.saldo }}{% if it.saldo < it.qtd %} — falta{% endif %})</span></li>{% endfor %}</ul>
+    {% if p.obs %}<p class="hint">{{ p.obs }}</p>{% endif %}
+    {% if p.status in ('pedido', 'separado') %}
+    <div class="actions">
+      {% if p.status == 'pedido' %}<form method="post" action="{{ url_for('pedido_acao', num=p.num, acao='separar') }}">{{ m.csrf_field() }}<button class="btn ghost small">Marcar como separado</button></form>{% endif %}
+      <form method="post" action="{{ url_for('pedido_acao', num=p.num, acao='entregar') }}">{{ m.csrf_field() }}<button class="btn small" data-confirm="Entregar o pedido {{ p.num }}? Vai dar baixa no estoque.">Entregar agora</button></form>
+      <form method="post" action="{{ url_for('pedido_acao', num=p.num, acao='cancelar') }}">{{ m.csrf_field() }}<button class="linkbtn danger" data-confirm="Cancelar o pedido {{ p.num }}?">Cancelar pedido</button></form>
+    </div>{% endif %}
+  </div>
+  {% else %}<p class="hint">Nenhum pedido aqui.</p>{% endfor %}
+
+  <h2 id="emprestimos">Empréstimos em aberto</h2>
+  {% for l in emprestimos %}
+  {% set atr = l.devolver_ate and l.devolver_ate < hoje_ %}
+  <div class="ped-card {{ 'atrasado' if atr }}">
+    <div class="ped-head"><b>{{ l.qtd }} un · {{ l.descricao }}</b><span class="chip {{ 'bad' if atr else 'warn' }}">{{ 'Atrasado' if atr else 'Emprestado' }}</span></div>
+    <span class="hint">Com <b>{{ l.solicitante or '?' }}</b>{% if l.area %} · {{ l.area }}{% endif %} desde {{ m.data_br(l.data) }} · devolver até <b>{{ m.data_br(l.devolver_ate) }}</b>{% if l.seriais %} · {{ l.seriais }}{% endif %}</span>
+    <form method="post" action="{{ url_for('lanc_acao', lid=l.id, acao='devolver') }}">{{ m.csrf_field() }}<input type="hidden" name="voltar" value="{{ url_for('pedidos') }}"><button class="btn ghost small">Registrar devolução</button></form>
+  </div>
+  {% else %}<p class="hint">Nenhum empréstimo em aberto.</p>{% endfor %}
+</section>
+
+<form class="panel" method="post" action="{{ url_for('pedido_novo') }}">{{ m.csrf_field() }}
+  <h2>Novo pedido</h2>
+  <div class="row2">
+    <div class="field"><label for="solicitante">Solicitante</label><input id="solicitante" name="solicitante" list="listaPessoas" required autocomplete="off"></div>
+    <div class="field"><label for="area">Área</label><input id="area" name="area" list="listaAreas" value="Montagem"></div>
+  </div>
+  <div class="field"><label for="os">Ordem de serviço</label><input id="os" name="os" placeholder="0000/00"></div>
+  <span class="lbl">Itens</span>
+  <div id="linhasPed" class="field">
+    <div class="linha-item"><div class="row2" style="grid-template-columns:minmax(0,3fr) minmax(0,1fr)">
+      <div class="field"><label>Item</label><input name="item" list="listaItens" autocomplete="off"></div>
+      <div class="field"><label>Qtd</label><input name="qtd" type="number" min="1" value="1" data-padrao="1"></div></div>
+      <button type="button" class="linkbtn danger" data-remover-linha>Remover</button></div>
+  </div>
+  <button type="button" class="btn ghost" data-add-linha="linhasPed">+ Outro item</button>
+  <div class="field"><label for="obs">Observação</label><input id="obs" name="obs"></div>
+  <button class="btn">Salvar pedido</button>
+</form>
+</div>
+{{ m.lista_itens(itens) }}{{ m.lista_pessoas(pessoas) }}{{ m.lista_areas(areas) }}
+{% endblock %}

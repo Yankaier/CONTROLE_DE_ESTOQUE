@@ -7,6 +7,76 @@ O projeto segue o mesmo modelo de dados e as mesmas regras do app **Movimentaç�
 (artefato do Claude usado no balcão, que lança na planilha *CONTROLE DE ESTOQUES 2.0* do SharePoint).
 Ele lê o arquivo **Movimento do dia** baixado do app e gera arquivos no mesmo formato.
 
+## Versão web (privada)
+
+Uma versão web com as **mesmas abas do app**: Início, Movimentação, Pedidos, Inventário e, em
+**Mais**, Descarte, Movimento do dia, Terminais, Relatórios e Pessoas. Ela grava direto na planilha
+**CONTROLE DE ESTOQUES 2.0** do mesmo jeito que o app grava.
+
+### Abrir
+
+No Windows, dê dois cliques em **`iniciar.bat`**. Na primeira vez ele prepara tudo (precisa do
+Python instalado) e abre o navegador em `http://127.0.0.1:5000`. No Linux ou Mac, use `./iniciar.sh`.
+
+Pelo terminal:
+
+```bash
+pip install -r requirements.txt
+python -m estoque web
+```
+
+### Privado
+
+- **Só o seu computador acessa:** o app só aceita conexões da própria máquina.
+- **Tudo pede senha:** no primeiro acesso você cria a senha (8 caracteres ou mais), e todas as páginas pedem login.
+- **Proteções de login:** a sessão expira em 12 horas e, depois de 8 tentativas erradas, o login fica bloqueado por 15 minutos.
+- **Formulários protegidos:** os formulários têm proteção contra envio forjado (CSRF).
+- **Senha guardada com segurança:** a senha fica guardada com hash. Para trocar, use **Mais ▸ Trocar senha**.
+- **Dados fora do GitHub:** banco, planilhas, cópias de segurança e CSVs não vão para o repositório (`.gitignore`).
+- **Uso no celular (opcional):** para usar no celular ou tablet na mesma rede Wi-Fi, rode
+  `python -m estoque web --rede`. Mesmo assim, continua pedindo senha.
+
+### Integração com a planilha
+
+Em **Mais ▸ Planilha** escolha uma das duas formas:
+
+1. **Pasta sincronizada (recomendado):**
+   - No SharePoint, abra a biblioteca da planilha e clique em **Sincronizar**. O OneDrive cria uma pasta no seu computador.
+   - Cole no app o caminho do `.xlsx` dessa pasta.
+   - Marque **Enviar à planilha automaticamente a cada registro**.
+   - Pronto: cada saída, entrada, pedido entregue, descarte ou item novo vai direto para a planilha, e o OneDrive sobe para o SharePoint.
+2. **Enviar o arquivo:**
+   - Carregue o `.xlsx` baixado do SharePoint.
+   - Trabalhe normalmente.
+   - No fim, use **Baixar cópia** e suba de volta no SharePoint.
+
+**Botões da tela Planilha:**
+
+- **Enviar** grava os lançamentos pendentes na aba **Movimentação**. Cada serial vira uma linha, e as unidades sem serial entram numa linha com lote "-".
+- O mesmo envio também grava:
+  - os itens novos na aba **Contagem**, copiando as fórmulas da última linha;
+  - as correções de cadastro;
+  - a aba **DESCARTES** inteira.
+- Antes de gravar, uma cópia do arquivo vai para `backups-estoque/` (ficam as 30 últimas).
+- **Trazer** lê o que foi lançado direto na planilha: linhas novas da Movimentação, itens da Contagem e descartes. Pode rodar sempre que quiser, porque nada é duplicado.
+- A planilha é editada no XML de dentro do `.xlsx`, igual ao app. Por isso fórmulas, tabela, filtros e formatação continuam como estão.
+- Feche a planilha no Excel antes de enviar.
+- Não apague linhas da Movimentação: para corrigir um lançamento, use **Estornar**.
+
+### O que dá para fazer em cada aba
+
+| Aba | O que faz |
+|---|---|
+| Início | Busca (aceita leitor de código de barras), atalhos e alertas: mínimo, empréstimos atrasados, pedidos, pendentes |
+| Movimentação | Saída/entrada com seriais, OS, NF, empréstimo, "lançar mesmo assim"; receber NF com vários itens; cadastrar e corrigir itens; estornar e excluir pendentes |
+| Pedidos | Pedido → separado → entregue (dá baixa), cancelar; empréstimos em aberto e devolução |
+| Inventário | Contar uma estante e ajustar o saldo só onde há diferença |
+| Descarte | Do estoque (gera saída na área Descarte) ou de fora; numeração D-0001 |
+| Movimento do dia | Tudo do dia, totais, imprimir e baixar `.csv` |
+| Terminais | Checklist de entrada/saída com OK/Defeito/N/A |
+| Relatórios | Consumo por área/pessoa/item/mês, previsão de falta, mínimo sugerido (aplicar com um clique), lista de compras em `.csv` |
+| Pessoas | Quem retira e de qual área |
+
 ## Como o projeto se liga ao app
 
 | No app (Movimentação do Almoxarifado)        | Neste projeto                                   |
@@ -75,6 +145,10 @@ python -m estoque importar "Movimento do dia 2026-11-10.csv"
 
 # Gerar o mesmo arquivo a partir deste banco (abre no Excel)
 python -m estoque dia 2026-11-10 --csv "Movimento do dia 2026-11-10.csv"
+
+# Direto com a planilha .xlsx
+python -m estoque planilha trazer "CONTROLE DE ESTOQUES 2.0.xlsx"
+python -m estoque planilha enviar "CONTROLE DE ESTOQUES 2.0.xlsx"
 ```
 
 A importação cria os itens que ainda não existem (pela estante, PT, caixa, SKU e descrição) e pula
@@ -86,8 +160,10 @@ não deixa o banco nem os CSVs irem para o GitHub, para que dados reais do almox
 ## Testes
 
 ```bash
-python -m unittest -v
+python -m unittest discover -s tests -t . -v
 ```
+
+Os testes da versão web rodam quando o Flask está instalado. Sem ele, são pulados.
 
 ## Estrutura
 
@@ -97,13 +173,16 @@ controle-de-estoque/
 │   ├── banco.py      # tabelas SQLite (mesmo modelo do app)
 │   ├── servico.py    # regras: itens, lançamentos, empréstimos, pedidos, descartes, relatórios
 │   ├── planilha.py   # importa/exporta o CSV "Movimento do dia" do app
-│   └── cli.py        # comandos de terminal
+│   ├── xlsx.py       # lê e grava a planilha CONTROLE DE ESTOQUES 2.0 (.xlsx)
+│   ├── sincronizar.py# trazer da planilha / enviar para a planilha
+│   ├── cli.py        # comandos de terminal
+│   └── web/          # versão web (Flask): telas, estilo e login
+├── iniciar.bat       # abre a versão web no Windows
+├── iniciar.sh        # abre a versão web no Linux/Mac
 └── tests/
-    └── test_estoque.py
 ```
 
 ## Próximos passos (ideias)
 
-- Interface web (Flask) com as mesmas abas do app
-- Ler direto a planilha CONTROLE DE ESTOQUES 2.0 (.xlsx)
-- Inventário por estante e relatório de consumo/compras
+- Comprovante de entrega com assinatura na tela (como no app)
+- Fotos no checklist de terminais
