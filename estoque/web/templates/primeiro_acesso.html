@@ -1,12 +1,14 @@
-{% extends "base.html" %}{% block titulo %}Primeiro acesso · Almoxarifado{% endblock %}
-{% block conteudo %}
-<form class="panel login-box" method="post">{{ m.csrf_field() }}
-  <h2>Primeiro acesso</h2>
-  <p class="hint">Crie a senha que vai proteger o app. Só quem souber essa senha entra.</p>
-  {% if erro %}<div class="alert bad">{{ erro }}</div>{% endif %}
-  <div class="field"><label for="nome">Seu nome (aparece na tela inicial)</label><input id="nome" name="nome" autocomplete="name"></div>
-  <div class="field"><label for="senha">Senha (8 caracteres ou mais)</label><input id="senha" name="senha" type="password" minlength="8" autocomplete="new-password" required></div>
-  <div class="field"><label for="senha2">Repita a senha</label><input id="senha2" name="senha2" type="password" minlength="8" autocomplete="new-password" required></div>
-  <button class="btn">Criar senha e entrar</button>
+{% extends "base.html" %}{% block titulo %}Primeiro acesso · Controle de Estoque{% endblock %}
+{% block acesso %}
+<form class="card accent" method="post">{{ m.csrf_field() }}
+  <div class="card-head"><div class="brand"><span class="brand-mark">{{ m.ic('caixa', 'lg') }}</span><span class="brand-text"><b>Almoxarifado</b><span>Primeiro acesso</span></span></div></div>
+  <div class="card-body">
+    <div><h2>Crie a sua senha</h2><p class="hint">Ela protege o app: só quem souber essa senha entra.</p></div>
+    {% if erro %}<div class="alert bad">{{ m.ic('erro') }}<span>{{ erro }}</span></div>{% endif %}
+    <div class="field"><label for="nome">Seu nome</label><input id="nome" name="nome" autocomplete="name"><span class="hint">Aparece no menu e na tela inicial.</span></div>
+    <div class="field"><label for="senha">Senha</label><input id="senha" name="senha" type="password" minlength="8" autocomplete="new-password" required><span class="hint">8 caracteres ou mais.</span></div>
+    <div class="field"><label for="senha2">Repita a senha</label><input id="senha2" name="senha2" type="password" minlength="8" autocomplete="new-password" required></div>
+    <button class="btn block">Criar senha e entrar</button>
+  </div>
 </form>
 {% endblock %}

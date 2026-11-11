@@ -94,7 +94,8 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
             a = alm()
             p = a.pendentes()
             dados.update(pend=p, pend_total=p["lancamentos"] + p["itens_novos"] + p["correcoes"],
-                         planilha=a.config("planilha"), n_pedidos=len(a.pedidos(abertos=True)))
+                         planilha=a.config("planilha"), n_pedidos=len(a.pedidos(abertos=True)),
+                         usuario=a.config("usuario", ""))
         return dados
 
     def aba(nome):

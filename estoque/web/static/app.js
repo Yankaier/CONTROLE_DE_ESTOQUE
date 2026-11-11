@@ -3,22 +3,22 @@ document.addEventListener('click', (e) => {
   const c = e.target.closest('[data-confirm]');
   if (c && !confirm(c.dataset.confirm)) { e.preventDefault(); e.stopPropagation(); }
   // fecha o menu "Mais" ao clicar fora
-  document.querySelectorAll('nav.tabs details[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+  document.querySelectorAll('details.mobile-nav[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
   // + Adicionar linha (NF, pedidos, itens novos): clona o modelo
   const add = e.target.closest('[data-add-linha]');
   if (add) {
     const alvo = document.getElementById(add.dataset.addLinha);
-    const modelo = alvo.querySelector('.linha-item, tr.linha');
+    const modelo = alvo.querySelector('.repeat-item');
     const nova = modelo.cloneNode(true);
     nova.querySelectorAll('input, textarea, select').forEach((i) => { if (i.type !== 'hidden') i.value = i.dataset.padrao || ''; });
-    (modelo.parentNode).appendChild(nova);
-    const f = nova.querySelector('input'); if (f) f.focus();
+    modelo.parentNode.appendChild(nova);
+    const f = nova.querySelector('input:not([type=hidden])'); if (f) f.focus();
   }
   if (e.target.closest('[data-imprimir]')) window.print();
   const rem = e.target.closest('[data-remover-linha]');
   if (rem) {
-    const linha = rem.closest('.linha-item, tr.linha');
-    if (linha.parentNode.querySelectorAll('.linha-item, tr.linha').length > 1) linha.remove();
+    const linha = rem.closest('.repeat-item');
+    if (linha.parentNode.querySelectorAll('.repeat-item').length > 1) linha.remove();
   }
 });
 // Empréstimo: liga/desliga a data de devolução

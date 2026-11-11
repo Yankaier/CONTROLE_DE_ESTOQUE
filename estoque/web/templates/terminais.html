@@ -1,24 +1,32 @@
 {% extends "base.html" %}{% block conteudo %}
+{{ m.cabecalho('Terminais', 'Checklist de entrada e saída de terminais, com o que está OK e o que tem defeito.', 'Registros') }}
 <div class="grid">
-<form class="panel" method="post">{{ m.csrf_field() }}
-  <h2>Checklist de terminal</h2>
-  <div class="actions"><label class="chk"><input type="radio" name="tipo" value="Entrada" checked> Entrada</label><label class="chk"><input type="radio" name="tipo" value="Saída"> Saída</label></div>
-  <div class="row2"><div class="field"><label for="serial">Serial do terminal</label><input id="serial" name="serial" required autofocus></div><div class="field"><label for="modelo">Modelo</label><input id="modelo" name="modelo"></div></div>
-  <div class="row2"><div class="field"><label for="local">Local / cliente</label><input id="local" name="local"></div><div class="field"><label for="resp">Responsável</label><input id="resp" name="resp"></div></div>
-  <div class="check-grid">
-    {% for c in checklist %}<div class="check-row"><span>{{ c }}</span><span class="opts">
-      <label><input type="radio" name="ck_{{ loop.index0 }}" value="OK" checked> OK</label>
-      <label><input type="radio" name="ck_{{ loop.index0 }}" value="Defeito"> Defeito</label>
-      <label><input type="radio" name="ck_{{ loop.index0 }}" value="N/A"> N/A</label></span></div>{% endfor %}
+<form class="card accent" method="post">{{ m.csrf_field() }}
+  <div class="card-head"><h2>{{ m.ic('terminais') }} Novo checklist</h2></div>
+  <div class="card-body">
+    <div class="radio-cards"><label><input type="radio" name="tipo" value="Entrada" checked> Entrada</label><label><input type="radio" name="tipo" value="Saída"> Saída</label></div>
+    <fieldset class="form-section"><legend>Terminal</legend>
+      <div class="row2"><div class="field"><label for="serial">Serial do terminal</label><input id="serial" name="serial" required autofocus></div><div class="field"><label for="modelo">Modelo</label><input id="modelo" name="modelo"></div></div>
+      <div class="row2"><div class="field"><label for="local">Local / cliente</label><input id="local" name="local"></div><div class="field"><label for="resp">Responsável</label><input id="resp" name="resp"></div></div>
+    </fieldset>
+    <fieldset class="form-section"><legend>Checklist</legend>
+      <div class="check-grid">
+        {% for c in checklist %}<div class="check-row"><span>{{ c }}</span><span class="opts">
+          <label><input type="radio" name="ck_{{ loop.index0 }}" value="OK" checked> OK</label>
+          <label><input type="radio" name="ck_{{ loop.index0 }}" value="Defeito"> Defeito</label>
+          <label><input type="radio" name="ck_{{ loop.index0 }}" value="N/A"> N/A</label></span></div>{% endfor %}
+      </div>
+    </fieldset>
+    <div class="field"><label for="obs">Observação</label><textarea id="obs" name="obs"></textarea></div>
   </div>
-  <div class="field"><label for="obs">Observação</label><textarea id="obs" name="obs"></textarea></div>
-  <button class="btn">Salvar checklist</button>
+  <div class="card-foot"><button class="btn">{{ m.ic('ok') }} Salvar checklist</button></div>
 </form>
-<section class="panel"><h2>Checklists salvos</h2>
-  <form method="get" class="actions"><input name="q" value="{{ q }}" type="search" placeholder="Serial, modelo ou local" style="flex:1"><button class="btn ghost">Procurar</button></form>
-  <div class="log">{% for t in lista %}<div class="log-item"><span class="chip {{ 'ok' if t.tipo == 'Entrada' else 'warn' }}">{{ t.tipo }}</span><span><b>{{ t.serial }}</b> {{ t.modelo }}</span>{% if t.defeitos %}<span class="chip bad">{{ t.defeitos }} defeito(s)</span>{% else %}<span></span>{% endif %}
-    <span class="who">{{ t.criado_em[:16] }}{% if t.local %} · {{ t.local }}{% endif %}{% if t.responsavel %} · {{ t.responsavel }}{% endif %}{% for k, v in t.checklist.items() if v == 'Defeito' %} · ✗ {{ k }}{% endfor %}{% if t.obs %} · {{ t.obs }}{% endif %}</span></div>
-  {% else %}<p class="hint">Os checklists salvos aparecem aqui.</p>{% endfor %}</div>
+<section class="card">
+  <div class="card-head"><h2>{{ m.ic('relogio') }} Checklists salvos</h2>
+    <form method="get" class="actions" style="width:100%"><div class="input-icon">{{ m.ic('busca') }}<input name="q" value="{{ q }}" type="search" placeholder="Serial, modelo ou local" aria-label="Procurar checklist"></div><button class="btn ghost">Procurar</button></form></div>
+  <div class="card-body flush"><div class="list">{% for t in lista %}<div class="list-item"><span class="chip {{ 'ok' if t.tipo == 'Entrada' else 'info' }}">{{ t.tipo }}</span><span class="title">{{ t.serial }} <span class="hint">{{ t.modelo }}</span></span>{% if t.defeitos %}<span class="chip bad">{{ t.defeitos }} defeito(s)</span>{% else %}<span class="chip ok plain">OK</span>{% endif %}
+    <span class="sub">{{ t.criado_em[:16] }}{% if t.local %} · {{ t.local }}{% endif %}{% if t.responsavel %} · {{ t.responsavel }}{% endif %}{% for k, v in t.checklist.items() if v == 'Defeito' %} · ✗ {{ k }}{% endfor %}{% if t.obs %} · {{ t.obs }}{% endif %}</span></div>
+  {% else %}{{ m.vazio('Os checklists salvos aparecem aqui.', 'terminais') }}{% endfor %}</div></div>
 </section>
 </div>
 {% endblock %}

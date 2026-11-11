@@ -1,78 +1,106 @@
 {% extends "base.html" %}{% block conteudo %}
-<div class="grid">
-<section class="panel">
-  <h2>Novo registro</h2>
-  <div class="seg" role="group" aria-label="Tipo de movimentação">
-    <a href="{{ url_for('mov', tipo='saida', item=item.id if item else None) }}" class="{{ 'on' if tipo == 'saida' }}">Saída</a>
-    <a href="{{ url_for('mov', tipo='entrada', item=item.id if item else None) }}" class="{{ 'on' if tipo == 'entrada' }}">Entrada</a>
-  </div>
-  {% if tipo == 'entrada' %}<div class="actions" style="justify-content:space-between"><span class="hint">Chegou material com nota fiscal?</span><a class="linkbtn" href="{{ url_for('receber_nf') }}">Receber nota fiscal (vários itens)</a></div>{% endif %}
+{% call m.cabecalho('Movimentação', 'Registre saídas e entradas. Cada registro vira uma linha na aba Movimentação da planilha.', 'Operação') %}
+  <a class="btn ghost" href="{{ url_for('receber_nf') }}">{{ m.ic('nf') }} Receber nota fiscal</a>
+  <a class="btn ghost" href="{{ url_for('item_novo') }}">{{ m.ic('mais') }} Cadastrar item</a>
+{% endcall %}
 
-  <div class="field">
-    <div class="actions" style="justify-content:space-between"><label for="q">Item</label><a class="linkbtn" href="{{ url_for('item_novo') }}">+ Cadastrar item novo</a></div>
-    <div class="filtros"><span class="lbl">Mostrar</span>
-      {% for k, n in [('tudo','Tudo'),('zerados','Zerados'),('minimo','Abaixo do mínimo'),('semsku','Sem SKU')] %}<a href="{{ url_for('mov', tipo=tipo, q=q, f=k) }}" class="{{ 'on' if filtro == k }}">{{ n }}</a>{% endfor %}
+<div class="grid">
+<div class="stack">
+  <section class="card">
+    <div class="card-head"><h2>{{ m.ic('busca') }} 1. Escolha o item</h2></div>
+    <div class="card-body">
+      <div class="seg" role="group" aria-label="Tipo de movimentação">
+        <a href="{{ url_for('mov', tipo='saida', item=item.id if item else None, q=q or None, f=filtro if filtro != 'tudo' else None) }}" class="out {{ 'on' if tipo == 'saida' }}">{{ m.ic('saida') }} Saída</a>
+        <a href="{{ url_for('mov', tipo='entrada', item=item.id if item else None, q=q or None, f=filtro if filtro != 'tudo' else None) }}" class="in {{ 'on' if tipo == 'entrada' }}">{{ m.ic('entrada') }} Entrada</a>
+      </div>
+      <form method="get" class="actions"><input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="f" value="{{ filtro }}">
+        <div class="input-icon">{{ m.ic('codigo') }}<input id="q" name="q" type="search" value="{{ q }}" placeholder="Nome, SKU, serial ou estante" {% if not item %}autofocus{% endif %} autocomplete="off" aria-label="Procurar item"></div>
+        <button class="btn ghost">{{ m.ic('busca') }} Procurar</button>
+      </form>
+      <div class="filtros"><span class="lbl">Mostrar</span>
+        {% for k, n in [('tudo','Tudo'),('zerados','Zerados'),('minimo','Abaixo do mínimo'),('semsku','Sem SKU')] %}<a href="{{ url_for('mov', tipo=tipo, q=q, f=k) }}" class="{{ 'on' if filtro == k }}">{{ n }}</a>{% endfor %}
+      </div>
+      <p class="hint">Com leitor de código de barras: clique na busca e bipe o serial ou o SKU. O item é escolhido sozinho e o serial já vem marcado.</p>
+      {% if resultados %}
+      <div class="results">{% for i in resultados %}<a href="{{ url_for('mov', tipo=tipo, item=i.id) }}"><span>{{ i.descricao }}{% if i.abaixo_do_minimo %}<span class="mintag">mínimo</span>{% endif %}</span><span class="meta">{{ i.local }} · SKU {{ i.sku }} · <b>{{ i.saldo }} un</b></span></a>{% endfor %}</div>
+      {% elif q or filtro != 'tudo' %}{{ m.vazio('Nenhum item encontrado.', 'busca') }}{% endif %}
     </div>
-    <form method="get" class="actions"><input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="f" value="{{ filtro }}">
-      <input id="q" name="q" type="search" value="{{ q }}" placeholder="Nome, SKU, serial ou estante" {% if not item %}autofocus{% endif %} autocomplete="off" style="flex:1"><button class="btn ghost">Procurar</button></form>
-    <p class="hint">Com leitor de código de barras: clique na busca e bipe o serial ou o SKU. O item é escolhido sozinho e o serial já vem marcado.</p>
-    {% if resultados %}
-    <div class="results">{% for i in resultados %}<a href="{{ url_for('mov', tipo=tipo, item=i.id) }}"><span>{{ i.descricao }}{% if i.abaixo_do_minimo %}<span class="mintag">mínimo</span>{% endif %}</span><span class="meta">{{ i.local }} · SKU {{ i.sku }} · {{ i.saldo }} un</span></a>{% endfor %}</div>
-    {% elif q or filtro != 'tudo' %}<p class="hint">Nenhum item encontrado.</p>{% endif %}
-  </div>
+  </section>
 
   {% if item %}
-  <form method="post" action="{{ url_for('registrar') }}" class="panel" style="padding:0;border:0">{{ m.csrf_field() }}
+  <form method="post" action="{{ url_for('registrar') }}" class="card {{ 'accent' }}">{{ m.csrf_field() }}
     <input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="item" value="{{ item.id }}">
-    {% if item.seriais or tipo == 'entrada' %}
-    <div class="field">
-      {% if item.seriais %}<span class="lbl">{{ 'Seriais em estoque: marque os que saem' if tipo == 'saida' else 'Seriais já em estoque' }}</span>
-      {% if tipo == 'saida' %}<div class="serials">{% for s in item.seriais %}<label><input type="checkbox" name="serial" value="{{ s }}" {{ 'checked' if s == serial_bipado }}> {{ s }}</label>{% endfor %}</div>
-      {% else %}<p class="meta">{{ item.seriais|join(', ') }}</p>{% endif %}{% endif %}
-      <label for="seriais_extra">{{ 'Seriais que entram' if tipo == 'entrada' else 'Outros seriais' }}, um por linha</label>
-      <textarea id="seriais_extra" name="seriais_extra" placeholder="818EZ2511000/341"></textarea>
-      <div class="actions"><label for="sem_serial">Unidades sem serial junto</label><input id="sem_serial" name="sem_serial" type="number" min="0" value="0" style="width:100px"></div>
-      <p class="hint">Cada serial vira uma linha na planilha; as unidades sem serial entram numa linha com lote "-". A quantidade é a soma.</p>
+    <div class="card-head"><h2>{{ m.ic('saida' if tipo == 'saida' else 'entrada') }} 2. {{ 'Saída' if tipo == 'saida' else 'Entrada' }} de {{ item.descricao }}</h2></div>
+    <div class="card-body">
+      {% if item.seriais or tipo == 'entrada' %}
+      <fieldset class="form-section"><legend>Seriais</legend>
+        {% if item.seriais %}
+          {% if tipo == 'saida' %}<span class="lbl">Em estoque: marque os que saem</span>
+          <div class="serials">{% for s in item.seriais %}<label><input type="checkbox" name="serial" value="{{ s }}" {{ 'checked' if s == serial_bipado }}> {{ s }}</label>{% endfor %}</div>
+          {% else %}<p class="hint">Já em estoque: <span class="meta">{{ item.seriais|join(', ') }}</span></p>{% endif %}
+        {% endif %}
+        <div class="field"><label for="seriais_extra">{{ 'Seriais que entram' if tipo == 'entrada' else 'Outros seriais' }} (um por linha)</label><textarea id="seriais_extra" name="seriais_extra" placeholder="818EZ2511000/341"></textarea></div>
+        <div class="row2"><div class="field"><label for="sem_serial">Unidades sem serial junto</label><input id="sem_serial" name="sem_serial" type="number" min="0" value="0"></div></div>
+        <p class="hint">Cada serial vira uma linha na planilha; as unidades sem serial entram numa linha com lote "-".</p>
+      </fieldset>
+      {% endif %}
+
+      <fieldset class="form-section"><legend>Quantidade e data</legend>
+        <div class="row2">
+          <div class="field"><label for="qtd">Quantidade</label><input id="qtd" name="qtd" type="number" min="1" value="1" inputmode="numeric" required></div>
+          <div class="field"><label for="data">Data</label><input id="data" name="data" type="date" value="{{ hoje }}"></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="form-section"><legend>Quem e para quê</legend>
+        <div class="row2">
+          <div class="field"><label for="solic">{{ 'Solicitante' if tipo == 'saida' else 'Quem devolveu / origem' }}</label><input id="solic" name="solic" list="listaPessoas" autocomplete="off" placeholder="LUAN"></div>
+          <div class="field"><label for="area">Área</label><input id="area" name="area" list="listaAreas" autocomplete="off" placeholder="Montagem"></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="os">Ordem de serviço</label><input id="os" name="os" placeholder="0000/00"></div>
+          <div class="field"><label for="nf">Nota fiscal / documento</label><input id="nf" name="nf" placeholder="-"></div>
+        </div>
+        <div class="field"><label for="obs">Observação</label><input id="obs" name="obs" autocomplete="off"></div>
+      </fieldset>
+
+      {% if tipo == 'saida' %}
+      <fieldset class="form-section"><legend>Empréstimo</legend>
+        <div class="row2" style="align-items:end">
+          <label class="chk"><input type="checkbox" id="emprestimo" name="emprestimo" value="1"> O material deve voltar</label>
+          <div class="field"><label for="devolver_ate">Devolver até</label><input id="devolver_ate" name="devolver_ate" type="date" disabled></div>
+        </div>
+      </fieldset>
+      {% if item.saldo <= 0 %}<div class="alert warn">{{ m.ic('alerta') }}<span>{{ item.descricao }} está com saldo {{ item.saldo }}. <label class="chk"><input type="checkbox" name="forcar" value="1"> Lançar mesmo assim</label></span></div>{% endif %}
+      {% endif %}
     </div>
-    {% endif %}
-    <div class="row2">
-      <div class="field"><label for="qtd">Quantidade</label><input id="qtd" name="qtd" type="number" min="1" value="{{ 1 if not serial_bipado else 1 }}" inputmode="numeric" required></div>
-      <div class="field"><label for="data">Data</label><input id="data" name="data" type="date" value="{{ hoje }}"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label for="solic">{{ 'Solicitante' if tipo == 'saida' else 'Quem devolveu / origem' }}</label><input id="solic" name="solic" list="listaPessoas" autocomplete="off" placeholder="LUAN"></div>
-      <div class="field"><label for="area">Área</label><input id="area" name="area" list="listaAreas" autocomplete="off" placeholder="Montagem"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label for="os">Ordem de serviço</label><input id="os" name="os" placeholder="0000/00"></div>
-      <div class="field"><label for="nf">Nota fiscal / doc</label><input id="nf" name="nf" placeholder="-"></div>
-    </div>
-    <div class="field"><label for="obs">Observação</label><input id="obs" name="obs" autocomplete="off"></div>
-    {% if tipo == 'saida' %}
-    <div class="actions">
-      <label class="chk"><input type="checkbox" id="emprestimo" name="emprestimo" value="1"> Empréstimo: o material deve voltar</label>
-      <div class="field"><label for="devolver_ate">Devolver até</label><input id="devolver_ate" name="devolver_ate" type="date" disabled></div>
-    </div>
-    {% if item.saldo <= 0 %}<div class="alert warn">{{ item.descricao }} está com saldo {{ item.saldo }}. <label class="chk"><input type="checkbox" name="forcar" value="1"> Lançar mesmo assim</label></div>{% endif %}
-    {% endif %}
-    <button class="btn">Registrar {{ 'saída' if tipo == 'saida' else 'entrada' }}</button>
+    <div class="card-foot"><button class="btn {{ 'go-out' if tipo == 'saida' else 'go-in' }} block">{{ m.ic('saida' if tipo == 'saida' else 'entrada') }} Registrar {{ 'saída' if tipo == 'saida' else 'entrada' }}</button></div>
   </form>
   {% endif %}
-</section>
+</div>
 
-<aside class="panel {{ 'primeiro-celular' if item }}">
+<aside class="stack {{ 'primeiro-celular' if item }}">
   {% if item %}
-  <div class="binlabel"><div class="stripe"></div><div class="body">
-    <div class="loc"><span>ESTANTE <b>{{ item.estante }}</b></span><span>PT <b>{{ item.pt }}</b></span>{% if item.caixa != '-' %}<span>CAIXA <b>{{ item.caixa }}</b></span>{% endif %}<span>SKU <b>{{ item.sku }}</b></span></div>
-    <div class="name">{{ item.descricao }}</div>
-    <div class="saldo"><span class="n">{{ item.saldo }}</span><span class="hint">em estoque{% if item.minimo %} · mínimo {{ item.minimo }}{% endif %}</span>{% if item.abaixo_do_minimo %}<span class="chip warn">No mínimo</span>{% endif %}{% if not item.na_planilha %}<span class="chip">Novo: entra na Contagem no próximo envio</span>{% endif %}</div>
-  </div></div>
-  <div class="actions"><a class="btn ghost small" href="{{ url_for('item_corrigir', iid=item.id) }}">Corrigir item / mínimo / saldo</a><a class="btn ghost small" href="{{ url_for('item_novo', base=item.id) }}">Novo item parecido</a></div>
-  <h3>Últimos deste item</h3>
-  <div class="log">{% for l in historico_item %}{{ m.lanc(l) }}{% else %}<p class="hint">Sem lançamentos.</p>{% endfor %}</div>
+  <section class="card">
+    <div class="card-body">
+      <div class="binlabel"><div class="stripe"></div><div class="body">
+        <div class="loc"><span>ESTANTE <b>{{ item.estante }}</b></span><span>PT <b>{{ item.pt }}</b></span>{% if item.caixa != '-' %}<span>CAIXA <b>{{ item.caixa }}</b></span>{% endif %}<span>SKU <b>{{ item.sku }}</b></span></div>
+        <div class="name">{{ item.descricao }}</div>
+        <div class="saldo"><span class="n">{{ item.saldo }}</span><span class="hint">em estoque{% if item.minimo %} · mínimo {{ item.minimo }}{% endif %}</span></div>
+        <div class="actions">{% if item.abaixo_do_minimo %}<span class="chip warn">No mínimo</span>{% endif %}{% if not item.na_planilha %}<span class="chip info">Novo: entra na Contagem no próximo envio</span>{% endif %}{% if item.seriais %}<span class="chip plain">{{ item.seriais|length }} serial(is)</span>{% endif %}</div>
+      </div></div>
+    </div>
+    <div class="card-foot"><a class="btn ghost small" href="{{ url_for('item_corrigir', iid=item.id) }}">{{ m.ic('editar') }} Corrigir item / mínimo / saldo</a><a class="btn ghost small" href="{{ url_for('item_novo', base=item.id) }}">{{ m.ic('copiar') }} Item parecido</a></div>
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>{{ m.ic('relogio') }} Últimos deste item</h2></div>
+    <div class="card-body flush"><div class="list">{% for l in historico_item %}{{ m.lanc(l) }}{% else %}{{ m.vazio('Sem lançamentos.') }}{% endfor %}</div></div>
+  </section>
   {% else %}
-  <h2>Últimos lançamentos</h2>
-  <div class="log">{% for l in ultimos %}{{ m.lanc(l) }}{% else %}<p class="hint">Nada registrado ainda.</p>{% endfor %}</div>
+  <section class="card">
+    <div class="card-head"><h2>{{ m.ic('relogio') }} Últimos lançamentos</h2><a class="linkbtn" href="{{ url_for('dia') }}">Movimento do dia</a></div>
+    <div class="card-body flush"><div class="list">{% for l in ultimos %}{{ m.lanc(l) }}{% else %}{{ m.vazio('Nada registrado ainda.') }}{% endfor %}</div></div>
+  </section>
   {% endif %}
 </aside>
 </div>

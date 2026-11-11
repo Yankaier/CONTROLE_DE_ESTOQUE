@@ -1,38 +1,46 @@
 {% extends "base.html" %}{% block conteudo %}
+{{ m.cabecalho('Planilha', 'Integração com a CONTROLE DE ESTOQUES 2.0: abas Movimentação, Contagem e DESCARTES.', 'Gestão') }}
 <div class="grid">
-<section class="panel">
-  <h2>Planilha CONTROLE DE ESTOQUES 2.0</h2>
-  {% if caminho %}
-  <p>Arquivo: <code>{{ caminho }}</code>{% if info %} <span class="meta">· {{ info.tamanho }} · alterado em {{ info.alterado }}</span>{% else %} <span class="chip bad">não encontrado</span>{% endif %}</p>
-  <div class="actions">
-    <form method="post">{{ m.csrf_field() }}<input type="hidden" name="acao" value="enviar">{% if pend_total %}<button class="btn">Enviar {{ pend_total }} pendente(s) à planilha</button>{% else %}<button class="btn" disabled>Nada pendente</button>{% endif %}</form>
-    <form method="post">{{ m.csrf_field() }}<input type="hidden" name="acao" value="trazer"><button class="btn ghost">Trazer da planilha</button></form>
-    <a class="btn ghost" href="{{ url_for('planilha_baixar') }}">Baixar cópia (.xlsx)</a>
-  </div>
-  <p class="hint"><b>Enviar</b> grava os lançamentos na aba Movimentação, os itens novos na aba Contagem, as correções de cadastro e a aba DESCARTES. Antes de gravar, uma cópia de segurança vai para a pasta <code>backups-estoque</code> (ficam as 30 últimas). Feche a planilha no Excel antes de enviar.</p>
-  <p class="hint"><b>Trazer</b> lê o que outras pessoas lançaram direto na planilha: linhas novas da Movimentação, itens da Contagem e descartes. Pode clicar quantas vezes quiser: nada é duplicado.</p>
-  {% else %}
-  <div class="alert warn">Nenhuma planilha configurada ainda. Escolha uma das duas formas abaixo.</div>
-  {% endif %}
+<div class="stack">
+  <section class="card accent">
+    <div class="card-head"><h2>{{ m.ic('planilha') }} Arquivo</h2>{% if caminho and info %}<span class="chip ok">Conectada</span>{% elif caminho %}<span class="chip bad">Não encontrada</span>{% else %}<span class="chip warn">Não configurada</span>{% endif %}</div>
+    <div class="card-body">
+      {% if caminho %}
+      <div><code>{{ caminho }}</code>{% if info %}<p class="meta" style="margin-top:6px">{{ info.tamanho }} · alterada em {{ info.alterado }}</p>{% endif %}</div>
+      <div class="actions">
+        <form method="post" class="inline-form">{{ m.csrf_field() }}<input type="hidden" name="acao" value="enviar">{% if pend_total %}<button class="btn">{{ m.ic('enviar') }} Enviar {{ pend_total }} pendente(s) à planilha</button>{% else %}<button class="btn" disabled>{{ m.ic('ok') }} Nada pendente</button>{% endif %}</form>
+        <form method="post" class="inline-form">{{ m.csrf_field() }}<input type="hidden" name="acao" value="trazer"><button class="btn ghost">{{ m.ic('atualizar') }} Trazer da planilha</button></form>
+        <a class="btn ghost" href="{{ url_for('planilha_baixar') }}">{{ m.ic('baixar') }} Baixar cópia (.xlsx)</a>
+      </div>
+      <p class="hint"><b>Enviar</b> grava os lançamentos na aba Movimentação, os itens novos na Contagem, as correções de cadastro e a aba DESCARTES. Antes de gravar, uma cópia de segurança vai para a pasta <code>backups-estoque</code> (ficam as 30 últimas). Feche a planilha no Excel antes de enviar.</p>
+      <p class="hint"><b>Trazer</b> lê o que foi lançado direto na planilha: linhas novas da Movimentação, itens da Contagem e descartes. Nada é duplicado.</p>
+      {% else %}
+      <div class="alert warn">{{ m.ic('alerta') }}<span>Nenhuma planilha configurada ainda. Escolha uma das duas formas ao lado.</span></div>
+      {% endif %}
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>{{ m.ic('relogio') }} Pendentes</h2><p>{{ pend.lancamentos }} lançamento(s) · {{ pend.itens_novos }} item(ns) novo(s) · {{ pend.correcoes }} correção(ões)</p></div>
+    <div class="card-body flush"><div class="list">{% for l in pendentes %}{{ m.lanc(l, acoes=False) }}{% else %}{{ m.vazio('Nenhum lançamento pendente.', 'ok') }}{% endfor %}</div></div>
+  </section>
+</div>
 
-  <h3>Pendentes ({{ pend.lancamentos }} lançamento(s), {{ pend.itens_novos }} item(ns) novo(s), {{ pend.correcoes }} correção(ões))</h3>
-  <div class="log">{% for l in pendentes %}{{ m.lanc(l, acoes=False) }}{% else %}<p class="hint">Nenhum lançamento pendente.</p>{% endfor %}</div>
-</section>
-
-<section class="panel">
-  <form method="post" class="panel" style="padding:0;border:0">{{ m.csrf_field() }}<input type="hidden" name="acao" value="config">
-    <h2>1. Arquivo sincronizado com o SharePoint (recomendado)</h2>
-    <p class="hint">No SharePoint, abra a biblioteca onde está a planilha e clique em <b>Sincronizar</b> (ou "Adicionar atalho a Meus arquivos"). O OneDrive cria uma pasta no seu computador. Cole aqui o caminho completo do arquivo nessa pasta. Cada envio do app grava no arquivo e o OneDrive sobe para o SharePoint sozinho.</p>
-    <div class="field"><label for="caminho">Caminho do arquivo .xlsx</label><input id="caminho" name="caminho" value="{{ caminho or '' }}" placeholder="C:\Users\voce\Empresa\Almoxarifado - Documentos\CONTROLE DE ESTOQUES 2.0.xlsx"></div>
-    <label class="chk"><input type="checkbox" name="auto" value="1" {{ 'checked' if auto }}> Enviar à planilha automaticamente a cada registro</label>
-    <button class="btn">Salvar</button>
+<div class="stack">
+  <form method="post" class="card">{{ m.csrf_field() }}<input type="hidden" name="acao" value="config">
+    <div class="card-head"><h2>1. Pasta sincronizada <span class="chip info plain">Recomendado</span></h2>
+      <p>No SharePoint, abra a biblioteca da planilha e clique em <b>Sincronizar</b>. O OneDrive cria uma pasta no seu computador. Cole aqui o caminho do arquivo nessa pasta: cada envio grava no arquivo e o OneDrive sobe para o SharePoint sozinho.</p></div>
+    <div class="card-body">
+      <div class="field"><label for="caminho">Caminho do arquivo .xlsx</label><input id="caminho" name="caminho" value="{{ caminho or '' }}" placeholder="C:\Users\voce\Empresa\Almoxarifado - Documentos\CONTROLE DE ESTOQUES 2.0.xlsx"></div>
+      <label class="chk"><input type="checkbox" name="auto" value="1" {{ 'checked' if auto }}> Enviar à planilha automaticamente a cada registro</label>
+    </div>
+    <div class="card-foot"><button class="btn">{{ m.ic('ok') }} Salvar</button></div>
   </form>
-  <form method="post" enctype="multipart/form-data" class="panel" style="padding:0;border:0">{{ m.csrf_field() }}<input type="hidden" name="acao" value="upload">
-    <h2>2. Enviar o arquivo</h2>
-    <p class="hint">Sem a pasta sincronizada: baixe a planilha do SharePoint e envie aqui. O app trabalha nessa cópia; depois use <b>Baixar cópia</b> e suba no SharePoint substituindo o arquivo. {% if caminho %}O arquivo atual vai para a pasta de cópias de segurança antes de ser substituído.{% endif %}</p>
-    <input type="file" name="arquivo" accept=".xlsx" required>
-    <button class="btn ghost">Carregar planilha</button>
+  <form method="post" enctype="multipart/form-data" class="card">{{ m.csrf_field() }}<input type="hidden" name="acao" value="upload">
+    <div class="card-head"><h2>2. Enviar o arquivo</h2>
+      <p>Sem pasta sincronizada: baixe a planilha do SharePoint e envie aqui. Depois use <b>Baixar cópia</b> e suba no SharePoint substituindo o arquivo.{% if caminho %} O arquivo atual vai para as cópias de segurança antes de ser substituído.{% endif %}</p></div>
+    <div class="card-body"><input type="file" name="arquivo" accept=".xlsx" required aria-label="Arquivo da planilha"></div>
+    <div class="card-foot"><button class="btn ghost">{{ m.ic('enviar') }} Carregar planilha</button></div>
   </form>
-</section>
+</div>
 </div>
 {% endblock %}

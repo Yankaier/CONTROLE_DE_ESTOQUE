@@ -1,30 +1,38 @@
 {% extends "base.html" %}{% block conteudo %}
-{% macro barras(pares) %}{% set mx = (pares|map('last')|max) if pares else 1 %}<div class="bars">{% for k, v in pares %}<div class="bar-row"><span class="bar-l">{{ k }}</span><span class="bar-t"><span class="bar-f" style="width:{{ (100 * v / mx)|round|int }}%"></span></span><span class="meta">{{ v }}</span></div>{% else %}<p class="hint">Sem saídas no período.</p>{% endfor %}</div>{% endmacro %}
-<section class="panel">
-  <div class="actions" style="justify-content:space-between"><div><h2>Relatórios</h2><p class="hint">Consumo, previsão de falta, mínimo sugerido e lista de compras.</p></div>
-  <form method="get" class="actions"><div class="field"><label for="dias">Período (dias)</label><input id="dias" name="dias" type="number" min="1" value="{{ r.dias }}" style="width:110px"></div><div class="field"><label for="prazo">Prazo de compra (dias)</label><input id="prazo" name="prazo" type="number" min="1" value="{{ r.prazo }}" style="width:110px"></div><button class="btn ghost">Atualizar</button></form></div>
-  <div class="cards"><div class="card out"><span class="n">{{ r.total }}</span><span class="l">unidades saíram em {{ r.dias }} dias</span></div><div class="card"><span class="n">{{ r.zerando|length }}</span><span class="l">vão zerar em até 21 dias</span></div><div class="card"><span class="n">{{ r.compras|length }}</span><span class="l">itens na lista de compras</span></div></div>
-  <div class="grid even">
-    <div><h3>Saídas por área</h3>{{ barras(r.por_area) }}</div>
-    <div><h3>Quem mais retirou</h3>{{ barras(r.por_pessoa) }}</div>
-    <div><h3>Itens que mais saíram</h3>{{ barras(r.por_item) }}</div>
-    <div><h3>Saídas por mês</h3>{{ barras(r.meses) }}</div>
-  </div>
+{% macro barras(pares) %}{% set mx = (pares|map('last')|max) if pares else 1 %}<div class="bars">{% for k, v in pares %}<div class="bar-row"><span class="bar-l" title="{{ k }}">{{ k }}</span><span class="bar-t"><span class="bar-f" style="width:{{ (100 * v / mx)|round|int }}%"></span></span><span class="bar-v">{{ v }}</span></div>{% else %}<p class="hint">Sem saídas no período.</p>{% endfor %}</div>{% endmacro %}
+{% call m.cabecalho('Relatórios', 'Consumo, previsão de falta, mínimo sugerido e lista de compras.', 'Gestão') %}
+  <form method="get" class="actions">
+    <div class="field"><label for="dias">Período (dias)</label><input id="dias" name="dias" type="number" min="1" value="{{ r.dias }}" class="w-num"></div>
+    <div class="field"><label for="prazo">Prazo de compra</label><input id="prazo" name="prazo" type="number" min="1" value="{{ r.prazo }}" class="w-num"></div>
+    <button class="btn ghost" style="align-self:end">{{ m.ic('atualizar') }} Atualizar</button>
+  </form>
+{% endcall %}
+<section class="stats">
+  <div class="stat out"><span class="stat-icon">{{ m.ic('saida', 'lg') }}</span><span><span class="n">{{ r.total }}</span><span class="l">saíram em {{ r.dias }} dias</span></span></div>
+  <div class="stat warn"><span class="stat-icon">{{ m.ic('alerta', 'lg') }}</span><span><span class="n">{{ r.zerando|length }}</span><span class="l">vão zerar em até 21 dias</span></span></div>
+  <div class="stat info"><span class="stat-icon">{{ m.ic('carrinho', 'lg') }}</span><span><span class="n">{{ r.compras|length }}</span><span class="l">na lista de compras</span></span></div>
 </section>
-<section class="panel"><h3>Lista de compras</h3>
-  {% if r.compras %}<div class="tab-wrap"><table><thead><tr><th>Item</th><th>SKU</th><th class="n">Saldo</th><th class="n">Mínimo</th><th class="n">Saída/dia</th><th class="n">Dura (dias)</th><th class="n">Comprar</th></tr></thead><tbody>
+<div class="grid even">
+  <section class="card"><div class="card-head"><h2>Saídas por área</h2></div><div class="card-body">{{ barras(r.por_area) }}</div></section>
+  <section class="card"><div class="card-head"><h2>Quem mais retirou</h2></div><div class="card-body">{{ barras(r.por_pessoa) }}</div></section>
+  <section class="card"><div class="card-head"><h2>Itens que mais saíram</h2></div><div class="card-body">{{ barras(r.por_item) }}</div></section>
+  <section class="card"><div class="card-head"><h2>Saídas por mês</h2></div><div class="card-body">{{ barras(r.meses) }}</div></section>
+</div>
+<section class="card">
+  <div class="card-head"><h2>{{ m.ic('carrinho') }} Lista de compras</h2>{% if r.compras %}<a class="btn ghost small" href="{{ url_for('compras_csv', dias=r.dias, prazo=r.prazo) }}">{{ m.ic('baixar') }} Baixar .csv</a>{% endif %}</div>
+  {% if r.compras %}<div class="table-wrap"><table><thead><tr><th>Item</th><th>SKU</th><th class="n">Saldo</th><th class="n">Mínimo</th><th class="n">Saída/dia</th><th class="n">Dura (dias)</th><th class="n">Comprar</th></tr></thead><tbody>
   {% for x in r.compras %}<tr><td><a href="{{ url_for('mov', item=x.item.id) }}">{{ x.item.descricao }}</a></td><td class="meta">{{ x.item.sku }}</td><td class="n">{{ x.item.saldo }}</td><td class="n">{{ x.item.minimo }}</td><td class="n">{{ '%.2f'|format(x.diario) }}</td><td class="n">{{ (x.cobertura|round|int) if x.diario > 0 else '—' }}</td><td class="n"><b>{{ x.comprar }}</b></td></tr>{% endfor %}</tbody></table></div>
-  <a class="btn ghost" href="{{ url_for('compras_csv', dias=r.dias, prazo=r.prazo) }}">Baixar lista de compras (.csv)</a>
-  {% else %}<p class="hint">Nada para comprar agora.</p>{% endif %}
+  {% else %}<div class="card-body">{{ m.vazio('Nada para comprar agora.', 'ok') }}</div>{% endif %}
 </section>
-<section class="panel"><h3>Previsão: vão zerar em até 21 dias</h3>
-  {% if r.zerando %}<div class="tab-wrap"><table><thead><tr><th>Item</th><th>Local</th><th class="n">Saldo</th><th class="n">Saída/dia</th><th class="n">Zera em</th></tr></thead><tbody>
-  {% for x in r.zerando %}<tr><td>{{ x.item.descricao }}</td><td class="meta">{{ x.item.local }}</td><td class="n">{{ x.item.saldo }}</td><td class="n">{{ '%.2f'|format(x.diario) }}</td><td class="n">{{ x.cobertura|round|int }} dias</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="hint">Nenhum item com previsão de zerar.</p>{% endif %}
+<section class="card">
+  <div class="card-head"><h2>{{ m.ic('alerta') }} Previsão: vão zerar em até 21 dias</h2></div>
+  {% if r.zerando %}<div class="table-wrap"><table><thead><tr><th>Item</th><th>Local</th><th class="n">Saldo</th><th class="n">Saída/dia</th><th class="n">Zera em</th></tr></thead><tbody>
+  {% for x in r.zerando %}<tr><td>{{ x.item.descricao }}</td><td class="meta">{{ x.item.local }}</td><td class="n">{{ x.item.saldo }}</td><td class="n">{{ '%.2f'|format(x.diario) }}</td><td class="n">{{ x.cobertura|round|int }} dias</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="card-body">{{ m.vazio('Nenhum item com previsão de zerar.', 'ok') }}</div>{% endif %}
 </section>
-<form class="panel" method="post" action="{{ url_for('aplicar_minimo') }}">{{ m.csrf_field() }}<input type="hidden" name="voltar" value="{{ url_for('relatorios', dias=r.dias, prazo=r.prazo) }}">
-  <h3>Estoque mínimo sugerido (cobre {{ r.prazo }} dias de saída)</h3>
-  {% if r.minimo_sugerido %}<div class="tab-wrap"><table><thead><tr><th>Item</th><th class="n">Saiu em {{ r.dias }} dias</th><th class="n">Mínimo atual</th><th class="n">Novo mínimo</th></tr></thead><tbody>
-  {% for x in r.minimo_sugerido[:60] %}<tr><td>{{ x.item.descricao }}</td><td class="n">{{ x.consumo }}</td><td class="n">{{ x.item.minimo }}</td><td class="n"><input name="m_{{ x.item.id }}" type="number" min="0" value="{{ x.sugerido }}" style="width:90px"></td></tr>{% endfor %}</tbody></table></div>
-  <button class="btn" data-confirm="Aplicar esses mínimos?">Aplicar mínimos</button>{% else %}<p class="hint">Os mínimos atuais já batem com o consumo.</p>{% endif %}
+<form class="card" method="post" action="{{ url_for('aplicar_minimo') }}">{{ m.csrf_field() }}<input type="hidden" name="voltar" value="{{ url_for('relatorios', dias=r.dias, prazo=r.prazo) }}">
+  <div class="card-head"><h2>{{ m.ic('editar') }} Estoque mínimo sugerido</h2><p>Cobre {{ r.prazo }} dias de saída, pelo consumo dos últimos {{ r.dias }} dias. Ajuste os valores e aplique.</p></div>
+  {% if r.minimo_sugerido %}<div class="table-wrap"><table><thead><tr><th>Item</th><th class="n">Saiu em {{ r.dias }} dias</th><th class="n">Mínimo atual</th><th class="n">Novo mínimo</th></tr></thead><tbody>
+  {% for x in r.minimo_sugerido[:60] %}<tr><td>{{ x.item.descricao }}</td><td class="n">{{ x.consumo }}</td><td class="n">{{ x.item.minimo }}</td><td class="n"><input name="m_{{ x.item.id }}" type="number" min="0" value="{{ x.sugerido }}" class="w-num" aria-label="Novo mínimo de {{ x.item.descricao }}"></td></tr>{% endfor %}</tbody></table></div>
+  <div class="card-foot"><button class="btn" data-confirm="Aplicar esses mínimos?">{{ m.ic('ok') }} Aplicar mínimos</button></div>{% else %}<div class="card-body">{{ m.vazio('Os mínimos atuais já batem com o consumo.', 'ok') }}</div>{% endif %}
 </form>
 {% endblock %}

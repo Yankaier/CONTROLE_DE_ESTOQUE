@@ -1,15 +1,30 @@
+{# ----- Peças reutilizáveis das telas ----- #}
+{% macro ic(nome, cls='') %}<svg class="icon {{ cls }}" aria-hidden="true"><use href="#i-{{ nome }}"/></svg>{% endmacro %}
 {% macro csrf_field() %}<input type="hidden" name="_csrf" value="{{ csrf }}">{% endmacro %}
+
+{# cabeçalho da página: título, descrição e (opcional) botões à direita #}
+{% macro cabecalho(titulo, descricao='', grupo='') %}
+<header class="page-header">
+  <div>{% if grupo %}<span class="eyebrow">{{ grupo }}</span>{% endif %}<h1>{{ titulo }}</h1>{% if descricao %}<p>{{ descricao }}</p>{% endif %}</div>
+  {% if caller %}<div class="page-actions">{{ caller() }}</div>{% endif %}
+</header>
+{% endmacro %}
+
+{% macro vazio(texto, icone='caixa') %}<div class="empty">{{ ic(icone) }}<span>{{ texto }}</span></div>{% endmacro %}
+
 {% macro lista_itens(itens, id="listaItens") %}<datalist id="{{ id }}">{% for i in itens %}<option value="#{{ i.id }} · {{ i.descricao }} · {{ i.local }} · SKU {{ i.sku }} · saldo {{ i.saldo }}"></option>{% endfor %}</datalist>{% endmacro %}
 {% macro lista_pessoas(pessoas) %}<datalist id="listaPessoas">{% for p in pessoas %}<option value="{{ p.nome }}">{{ p.area }}</option>{% endfor %}</datalist>{% endmacro %}
 {% macro lista_areas(areas) %}<datalist id="listaAreas">{% for a in areas %}<option value="{{ a }}"></option>{% endfor %}</datalist>{% endmacro %}
 {% macro data_br(iso) %}{% if iso %}{{ iso[8:10] }}/{{ iso[5:7] }}/{{ iso[0:4] }}{% endif %}{% endmacro %}
+
+{# um lançamento na lista, com as ações possíveis #}
 {% macro lanc(l, acoes=True) %}
 {% set saiu = l.movim == 'Saída' or l.qtd < 0 %}
-<div class="log-item">
+<div class="list-item">
   <span class="qty {{ 'out' if saiu else 'in' }}">{{ '−' if saiu else '+' }}{{ l.qtd|abs }}</span>
-  <span><a href="{{ url_for('mov', item=l.item_id) }}">{{ l.descricao }}</a></span>
+  <span class="title"><a href="{{ url_for('mov', item=l.item_id) }}">{{ l.descricao }}</a></span>
   {% if l.estornado_por %}<span class="chip bad">Estornado</span>{% elif l.status == 'lancado' %}<span class="chip ok">Linha {{ (l.linhas or '').split(',')[0] }}{% if ',' in (l.linhas or '') %}+{% endif %}</span>{% else %}<span class="chip warn">Pendente</span>{% endif %}
-  <span class="who">{{ data_br(l.data) }} · {{ l.movim }} · {{ l.solicitante or 'sem solicitante' }}{% if l.area %} · {{ l.area }}{% endif %}{% if l.os %} · OS {{ l.os }}{% endif %}{% if l.nf %} · NF {{ l.nf }}{% endif %}{% if l.seriais %} · {{ l.seriais }}{% endif %}{% if l.emprestimo %} · {% if l.devolvido_por %}empréstimo devolvido{% else %}empréstimo até {{ data_br(l.devolver_ate) }}{% endif %}{% endif %}{% if l.obs %} · {{ l.obs }}{% endif %}</span>
+  <span class="sub">{{ data_br(l.data) }} · {{ l.movim }} · {{ l.solicitante or 'sem solicitante' }}{% if l.area %} · {{ l.area }}{% endif %}{% if l.os %} · OS {{ l.os }}{% endif %}{% if l.nf %} · NF {{ l.nf }}{% endif %}{% if l.seriais %} · <span class="meta">{{ l.seriais }}</span>{% endif %}{% if l.emprestimo %} · {% if l.devolvido_por %}empréstimo devolvido{% else %}<b>empréstimo até {{ data_br(l.devolver_ate) }}</b>{% endif %}{% endif %}{% if l.obs %} · {{ l.obs }}{% endif %}</span>
   {% if acoes and not l.estornado_por and not l.estorno_de %}
   <div class="acts">
     {% if l.status == 'pendente' %}

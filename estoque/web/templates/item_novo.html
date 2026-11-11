@@ -1,26 +1,29 @@
 {% extends "base.html" %}{% block conteudo %}
-<form class="panel" method="post">{{ m.csrf_field() }}
-  <div class="actions" style="justify-content:space-between"><h2>Cadastrar itens novos</h2><a class="linkbtn" href="{{ url_for('mov') }}">Voltar aos registros</a></div>
-  <p class="hint">O item entra na aba Contagem da planilha no próximo envio, com as fórmulas copiadas da última linha. O saldo inicial vira um lançamento "Saldo Inicial".</p>
-  <div id="linhasNovo" class="field">
-    <div class="linha-item">
-      <div class="field"><label>Descrição</label><input name="descricao" value="{{ base.descricao if base else '' }}" required></div>
-      <div class="row4">
-        <div class="field"><label>Estante</label><input name="estante" list="listaEst" value="{{ base.estante if base else '' }}" data-padrao="{{ base.estante if base else '' }}"></div>
-        <div class="field"><label>PT</label><input name="pt" value="{{ base.pt if base else '' }}" data-padrao="{{ base.pt if base else '' }}"></div>
-        <div class="field"><label>Caixa</label><input name="caixa" value="{{ base.caixa if base else '' }}" data-padrao="{{ base.caixa if base else '' }}"></div>
-        <div class="field"><label>SKU</label><input name="sku" value="{{ base.sku if base else '' }}" data-padrao="{{ base.sku if base else '' }}"></div>
+{% call m.cabecalho('Cadastrar itens novos', 'O item entra na aba Contagem no próximo envio, com as fórmulas copiadas da última linha. O saldo inicial vira um lançamento "Saldo Inicial".', 'Movimentação') %}
+  <a class="btn ghost" href="{{ url_for('mov') }}">Voltar</a>
+{% endcall %}
+<form class="card" method="post">{{ m.csrf_field() }}
+  <div class="card-body">
+    <div id="linhasNovo" class="repeat">
+      <div class="repeat-item">
+        <button type="button" class="linkbtn danger" data-remover-linha>Remover</button>
+        <div class="field"><label>Descrição</label><input name="descricao" value="{{ base.descricao if base else '' }}" required></div>
+        <div class="row4">
+          <div class="field"><label>Estante</label><input name="estante" list="listaEst" value="{{ base.estante if base else '' }}" data-padrao="{{ base.estante if base else '' }}"></div>
+          <div class="field"><label>PT (prateleira)</label><input name="pt" value="{{ base.pt if base else '' }}" data-padrao="{{ base.pt if base else '' }}"></div>
+          <div class="field"><label>Caixa</label><input name="caixa" value="{{ base.caixa if base else '' }}" data-padrao="{{ base.caixa if base else '' }}"></div>
+          <div class="field"><label>SKU</label><input name="sku" value="{{ base.sku if base else '' }}" data-padrao="{{ base.sku if base else '' }}"></div>
+        </div>
+        <div class="row3">
+          <div class="field"><label>Saldo inicial</label><input name="qtd" type="number" min="0" value="0" data-padrao="0"></div>
+          <div class="field"><label>Estoque mínimo</label><input name="minimo" type="number" min="0" value="{{ base.minimo if base else 0 }}" data-padrao="0"></div>
+          <div class="field"><label>Seriais (um por linha)</label><textarea name="seriais"></textarea></div>
+        </div>
       </div>
-      <div class="row3">
-        <div class="field"><label>Saldo inicial</label><input name="qtd" type="number" min="0" value="0" data-padrao="0"></div>
-        <div class="field"><label>Estoque mínimo</label><input name="minimo" type="number" min="0" value="{{ base.minimo if base else 0 }}" data-padrao="0"></div>
-        <div class="field"><label>Seriais (um por linha)</label><textarea name="seriais"></textarea></div>
-      </div>
-      <button type="button" class="linkbtn danger" data-remover-linha>Remover</button>
     </div>
+    <div><button type="button" class="btn ghost" data-add-linha="linhasNovo">{{ m.ic('mais') }} Adicionar outro item</button></div>
   </div>
-  <button type="button" class="btn ghost" data-add-linha="linhasNovo">+ Adicionar outro item</button>
-  <button class="btn">Cadastrar</button>
+  <div class="card-foot"><button class="btn">{{ m.ic('ok') }} Cadastrar</button></div>
 </form>
 <datalist id="listaEst">{% for e in estantes %}<option value="{{ e }}"></option>{% endfor %}</datalist>
 {% endblock %}

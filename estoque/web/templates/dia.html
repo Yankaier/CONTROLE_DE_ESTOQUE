@@ -1,14 +1,17 @@
 {% extends "base.html" %}{% block conteudo %}
-<section class="panel">
-  <div class="actions" style="justify-content:space-between">
-    <div><h2>Movimento do dia</h2><p class="hint">{{ m.data_br(data) }}</p></div>
-    <form method="get" class="actions no-print"><a class="btn ghost small" href="{{ url_for('dia', data=anterior) }}">◀</a><input type="date" name="data" value="{{ data }}" style="width:auto"><button class="btn ghost small">Ver</button><a class="btn ghost small" href="{{ url_for('dia', data=seguinte) }}">▶</a></form>
-  </div>
-  <div class="cards"><div class="card"><span class="n">{{ lista|length }}</span><span class="l">registros</span></div><div class="card in"><span class="n">+{{ ent }}</span><span class="l">unidades entraram</span></div><div class="card out"><span class="n">−{{ sai }}</span><span class="l">unidades saíram</span></div></div>
-  <div class="actions no-print"><a class="btn ghost" href="{{ url_for('dia_csv', data=data) }}">Baixar planilha do dia (.csv)</a><button type="button" class="btn ghost" data-imprimir>Imprimir</button></div>
-  <div class="tab-wrap"><table><thead><tr><th>Hora</th><th>Tipo</th><th>Local</th><th>Item</th><th class="n">Qtd</th><th>Solicitante</th><th>Área</th><th>OS / NF</th><th>Situação</th></tr></thead><tbody>
-  {% for l in lista %}<tr class="{{ 'pend' if l.status == 'pendente' }}"><td>{{ l.criado_em[11:16] }}</td><td>{{ l.movim }}</td><td class="meta">{{ l.estante }} · {{ l.pt }}{% if l.caixa != '-' %} · {{ l.caixa }}{% endif %}</td><td>{{ l.descricao }}{% if l.seriais %}<div class="meta">{{ l.seriais }}</div>{% endif %}{% if l.obs %}<div class="hint">{{ l.obs }}</div>{% endif %}</td>
-  <td class="n">{{ '−' if l.movim == 'Saída' or l.qtd < 0 else '+' }}{{ l.qtd|abs }}</td><td>{{ l.solicitante }}</td><td>{{ l.area }}</td><td>{{ l.os }}{% if l.nf %} / {{ l.nf }}{% endif %}</td><td>{% if l.status == 'lancado' %}Linha {{ l.linhas }}{% else %}Pendente{% endif %}</td></tr>
-  {% else %}<tr><td colspan="9" class="hint">Nada registrado neste dia.</td></tr>{% endfor %}</tbody></table></div>
+{% call m.cabecalho('Movimento do dia', m.data_br(data), 'Registros') %}
+  <form method="get" class="actions no-print"><a class="btn ghost small" href="{{ url_for('dia', data=anterior) }}" aria-label="Dia anterior">◀</a><input type="date" name="data" value="{{ data }}" class="w-auto" aria-label="Data"><button class="btn ghost small">Ver</button><a class="btn ghost small" href="{{ url_for('dia', data=seguinte) }}" aria-label="Próximo dia">▶</a></form>
+{% endcall %}
+<section class="stats">
+  <div class="stat info"><span class="stat-icon">{{ m.ic('dia', 'lg') }}</span><span><span class="n">{{ lista|length }}</span><span class="l">registros</span></span></div>
+  <div class="stat in"><span class="stat-icon">{{ m.ic('entrada', 'lg') }}</span><span><span class="n">+{{ ent }}</span><span class="l">unidades entraram</span></span></div>
+  <div class="stat out"><span class="stat-icon">{{ m.ic('saida', 'lg') }}</span><span><span class="n">−{{ sai }}</span><span class="l">unidades saíram</span></span></div>
+</section>
+<section class="card">
+  <div class="card-head"><h2>{{ m.ic('planilha') }} Registros</h2><div class="actions no-print"><a class="btn ghost small" href="{{ url_for('dia_csv', data=data) }}">{{ m.ic('baixar') }} Baixar .csv</a><button type="button" class="btn ghost small" data-imprimir>{{ m.ic('imprimir') }} Imprimir</button></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Hora</th><th>Tipo</th><th>Local</th><th>Item</th><th class="n">Qtd</th><th>Solicitante</th><th>Área</th><th>OS / NF</th><th>Situação</th></tr></thead><tbody>
+  {% for l in lista %}{% set saiu = l.movim == 'Saída' or l.qtd < 0 %}<tr class="{{ 'pend' if l.status == 'pendente' }}"><td>{{ l.criado_em[11:16] }}</td><td>{{ l.movim }}</td><td class="meta">{{ l.estante }} · {{ l.pt }}{% if l.caixa != '-' %} · {{ l.caixa }}{% endif %}</td><td>{{ l.descricao }}{% if l.seriais %}<div class="meta">{{ l.seriais }}</div>{% endif %}{% if l.obs %}<div class="hint">{{ l.obs }}</div>{% endif %}</td>
+  <td class="n {{ 'qty-out' if saiu else 'qty-in' }}">{{ '−' if saiu else '+' }}{{ l.qtd|abs }}</td><td>{{ l.solicitante }}</td><td>{{ l.area }}</td><td>{{ l.os }}{% if l.nf %} / {{ l.nf }}{% endif %}</td><td>{% if l.status == 'lancado' %}<span class="chip ok">Linha {{ l.linhas }}</span>{% else %}<span class="chip warn">Pendente</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="9">{{ m.vazio('Nada registrado neste dia.', 'dia') }}</td></tr>{% endfor %}</tbody></table></div>
 </section>
 {% endblock %}

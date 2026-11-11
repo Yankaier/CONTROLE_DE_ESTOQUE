@@ -1,9 +1,11 @@
 {% extends "base.html" %}{% block conteudo %}
-<form class="panel login-box" method="post">{{ m.csrf_field() }}
-  <h2>Trocar senha</h2>
-  <div class="field"><label for="atual">Senha atual</label><input id="atual" name="atual" type="password" required autocomplete="current-password"></div>
-  <div class="field"><label for="nova">Senha nova</label><input id="nova" name="nova" type="password" minlength="8" required autocomplete="new-password"></div>
-  <div class="field"><label for="nova2">Repita a senha nova</label><input id="nova2" name="nova2" type="password" minlength="8" required autocomplete="new-password"></div>
-  <button class="btn">Trocar</button>
+{{ m.cabecalho('Trocar senha', 'A senha protege todas as telas do app.', 'Conta') }}
+<form class="card" method="post" style="max-width:460px">{{ m.csrf_field() }}
+  <div class="card-body">
+    <div class="field"><label for="atual">Senha atual</label><input id="atual" name="atual" type="password" required autocomplete="current-password"></div>
+    <div class="field"><label for="nova">Senha nova</label><input id="nova" name="nova" type="password" minlength="8" required autocomplete="new-password"></div>
+    <div class="field"><label for="nova2">Repita a senha nova</label><input id="nova2" name="nova2" type="password" minlength="8" required autocomplete="new-password"></div>
+  </div>
+  <div class="card-foot"><button class="btn">{{ m.ic('chave') }} Trocar senha</button></div>
 </form>
 {% endblock %}

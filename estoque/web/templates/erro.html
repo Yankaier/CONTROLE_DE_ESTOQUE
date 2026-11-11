@@ -1,3 +1,4 @@
 {% extends "base.html" %}{% block conteudo %}
-<div class="panel"><div class="alert bad">{{ erro }}</div><a class="btn ghost" href="{{ url_for('inicio') }}">Voltar ao início</a></div>
+<div class="card"><div class="card-body"><div class="alert bad">{{ m.ic('erro') }}<span>{{ erro }}</span></div><div><a class="btn ghost" href="{{ url_for('inicio') }}">{{ m.ic('inicio') }} Voltar ao início</a></div></div></div>
 {% endblock %}
+{% block acesso %}<div class="card"><div class="card-body"><div class="alert bad">{{ erro }}</div></div></div>{% endblock %}

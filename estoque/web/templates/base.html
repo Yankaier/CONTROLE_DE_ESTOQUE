@@ -1,29 +1,66 @@
-{% import "_m.html" as m with context %}<!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block titulo %}Movimentação do Almoxarifado{% endblock %}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='estilo.css') }}">
-<script src="{{ url_for('static', filename='app.js') }}" defer></script></head>
-<body><div class="wrap">
+{% import "_m.html" as m with context %}
+{% macro flashes() %}{% with msgs = get_flashed_messages(with_categories=true) %}{% if msgs %}<div class="flashes">{% for cat, msg in msgs %}<div class="alert {{ cat }}" role="status">{{ m.ic({'ok': 'ok', 'warn': 'alerta', 'bad': 'erro'}.get(cat, 'ok')) }}<span>{{ msg }}</span></div>{% endfor %}</div>{% endif %}{% endwith %}{% endmacro %}<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block titulo %}{{ titulo_pagina|default('Almoxarifado') }} · Controle de Estoque{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='estilo.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+{% include "_icones.html" %}
 {% if pend is defined %}
-<header class="top">
-  <div><h1><a href="{{ url_for('inicio') }}">Movimentação do Almoxarifado</a></h1>
-  <p class="sub">Entradas e saídas lançadas na planilha {{ (planilha or 'CONTROLE DE ESTOQUES 2.0').split('/')[-1].split('\\')[-1] }}.</p></div>
-  <div class="sync">
-    {% if not planilha %}<a class="chip bad" href="{{ url_for('planilha') }}">Planilha não configurada</a>
-    {% elif pend_total %}<a class="chip warn" href="{{ url_for('planilha') }}">{{ pend_total }} pendente(s)</a>
-    <form method="post" action="{{ url_for('planilha') }}">{{ m.csrf_field() }}<input type="hidden" name="acao" value="enviar"><button class="btn ghost">Enviar à planilha</button></form>
-    {% else %}<a class="chip ok" href="{{ url_for('planilha') }}">Planilha em dia</a>{% endif %}
-    <form method="post" action="{{ url_for('sair') }}">{{ m.csrf_field() }}<button class="linkbtn">Sair</button></form>
+{% set GRUPOS = [
+  ('Operação', [('inicio', 'Início', 'inicio'), ('mov', 'Movimentação', 'mov'), ('pedidos', 'Pedidos', 'pedidos'), ('inventario', 'Inventário', 'inventario')]),
+  ('Registros', [('descarte', 'Descarte', 'descarte'), ('dia', 'Movimento do dia', 'dia'), ('terminais', 'Terminais', 'terminais')]),
+  ('Gestão', [('relatorios', 'Relatórios', 'relatorios'), ('pessoas', 'Pessoas', 'pessoas'), ('planilha', 'Planilha', 'planilha')]),
+] %}
+{% macro menu() %}
+<nav class="nav" aria-label="Áreas do app">
+  {% for titulo, links in GRUPOS %}
+  <div class="nav-group"><span class="nav-title">{{ titulo }}</span>
+    {% for k, nome, icone in links %}<a href="{{ url_for(k) }}" class="{{ 'on' if aba == k }}" {% if aba == k %}aria-current="page"{% endif %}>{{ m.ic(icone) }}<span>{{ nome }}</span>{% if k == 'pedidos' and n_pedidos %}<span class="count">{{ n_pedidos }}</span>{% elif k == 'planilha' and pend_total %}<span class="count">{{ pend_total }}</span>{% endif %}</a>{% endfor %}
   </div>
-</header>
-<nav class="tabs" aria-label="Áreas">
-  {% for k, nome in ABAS %}<a href="{{ url_for(k) }}" class="{{ 'on' if aba == k }}">{{ nome }}{% if k == 'pedidos' and n_pedidos %}<span class="count">{{ n_pedidos }}</span>{% endif %}</a>{% endfor %}
-  {% set mais_on = aba in (MAIS|map('first')|list) %}
-  <details class="{{ 'on' if mais_on }}"><summary>{% if mais_on %}{% for k, nome in MAIS %}{% if k == aba %}{{ nome }}{% endif %}{% endfor %}{% else %}Mais{% endif %} ▾</summary>
-    <div class="menu">{% for k, nome in MAIS %}<a href="{{ url_for(k) }}" class="{{ 'on' if aba == k }}">{{ nome }}</a>{% endfor %}<a href="{{ url_for('planilha') }}" class="{{ 'on' if aba == 'planilha' }}">Planilha</a><a href="{{ url_for('trocar_senha') }}">Trocar senha</a></div>
-  </details>
+  {% endfor %}
 </nav>
+{% endmacro %}
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="{{ url_for('inicio') }}"><span class="brand-mark">{{ m.ic('caixa', 'lg') }}</span><span class="brand-text"><b>Almoxarifado</b><span>Controle de estoque</span></span></a>
+    {{ menu() }}
+    <div class="side-foot">
+      <div class="user"><span class="avatar">{{ (usuario or 'A')[:1]|upper }}</span><span>{{ usuario or 'Almoxarifado' }}</span></div>
+      <div class="side-links">
+        <a href="{{ url_for('trocar_senha') }}">{{ m.ic('chave') }} Trocar senha</a>
+        <form method="post" action="{{ url_for('sair') }}" class="inline-form">{{ m.csrf_field() }}<button>{{ m.ic('sair') }} Sair</button></form>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-title">{{ m.ic('planilha') }}<span>Planilha:</span> <b>{{ (planilha or 'não configurada').replace('\\', '/').split('/')[-1] }}</b></div>
+      <div class="sync">
+        {% if not planilha %}<a class="chip bad" href="{{ url_for('planilha') }}">Planilha não configurada</a>
+        {% elif pend_total %}<a class="chip warn" href="{{ url_for('planilha') }}">{{ pend_total }} pendente(s)</a>
+        <form method="post" action="{{ url_for('planilha') }}">{{ m.csrf_field() }}<input type="hidden" name="acao" value="enviar"><button class="btn small">{{ m.ic('enviar') }} Enviar à planilha</button></form>
+        {% else %}<a class="chip ok" href="{{ url_for('planilha') }}">Planilha em dia</a>{% endif %}
+        <details class="mobile-nav"><summary class="btn ghost small">{{ m.ic('menu') }} Menu</summary>
+          <div class="menu">{{ menu() }}
+            <div class="side-foot"><div class="side-links"><a href="{{ url_for('trocar_senha') }}">{{ m.ic('chave') }} Trocar senha</a><form method="post" action="{{ url_for('sair') }}" class="inline-form">{{ m.csrf_field() }}<button>{{ m.ic('sair') }} Sair</button></form></div></div>
+          </div>
+        </details>
+      </div>
+    </header>
+    <main class="content">
+      {{ flashes() }}
+      {% block conteudo %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% else %}
+<main class="auth">{{ flashes() }}{% block acesso %}{% endblock %}</main>
 {% endif %}
-{% with msgs = get_flashed_messages(with_categories=true) %}{% for cat, msg in msgs %}<div class="alert {{ cat }}" role="status">{{ msg }}</div>{% endfor %}{% endwith %}
-{% block conteudo %}{% endblock %}
-</div></body></html>
+</body>
+</html>
