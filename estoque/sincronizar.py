@@ -189,7 +189,11 @@ def enviar_para_planilha(alm: Almoxarifado, caminho: str | Path, pasta_backup: s
     if not caminho.exists():
         raise ErroPlanilha(f"Planilha não encontrada em {caminho}.")
     dados = caminho.read_bytes()
+    # antes de gravar, traz o que outra pessoa/aparelho lançou direto na planilha,
+    # para não perder nada e escrever depois da última linha que existe de verdade
+    trazidos = trazer_da_planilha(alm, dados)
     novo, confirmar, resumo = preparar_envio(alm, dados)
+    resumo["trazidos"] = trazidos
     if not (resumo["linhas"] or resumo["itens_novos"] or resumo["correcoes"] or resumo["descartes"]):
         return resumo
     pasta_backup = Path(pasta_backup or caminho.parent / "backups-estoque")
@@ -215,3 +219,25 @@ def gravar_arquivo(caminho: Path, dados: bytes) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def avisos_planilha(caminho: str | Path | None) -> list[str]:
+    """Problemas que atrapalham a gravação: Excel aberto e cópias em conflito do OneDrive."""
+    if not caminho:
+        return []
+    p = Path(caminho)
+    avisos = []
+    if not p.is_file():
+        return [f"A planilha não foi encontrada em {p}. Confira se o OneDrive está sincronizando."]
+    if (p.parent / f"~${p.name}").exists() or (p.parent / f"~${p.name[2:]}").exists():
+        avisos.append("A planilha está aberta no Excel neste computador. Feche o Excel para o envio funcionar.")
+    try:
+        irmaos = [x for x in p.parent.iterdir() if x.is_file() and x.suffix.lower() == p.suffix.lower()
+                  and x.name != p.name and x.stem.startswith(p.stem + "-") and not x.name.startswith("~$")]
+    except OSError:
+        irmaos = []
+    if irmaos:
+        nomes = ", ".join(sorted(x.name for x in irmaos)[:3])
+        avisos.append(f"O OneDrive criou cópia(s) em conflito da planilha ({nomes}). Abra no Excel, confira se "
+                      "há lançamentos só nela e apague a cópia depois de juntar.")
+    return avisos

@@ -67,6 +67,26 @@ Em **Mais ▸ Planilha** escolha uma das duas formas:
 - Feche a planilha no Excel antes de enviar.
 - Não apague linhas da Movimentação: para corrigir um lançamento, use **Estornar**.
 
+### Usar no celular e no notebook ao mesmo tempo
+
+- **Como funciona:** o notebook é o "servidor". O celular abre o app do notebook pela rede Wi-Fi. Os dois usam **o mesmo banco ao mesmo tempo**, sem precisar sincronizar.
+- **Como ligar:** em **Gestão ▸ Aparelhos**, clique em **Ligar acesso pelo celular** e depois em **Conectar um celular**. Leia o QR code com o celular, que precisa estar no mesmo Wi-Fi.
+- **Segurança:**
+  - Conexão **HTTPS**, com certificado criado no próprio notebook.
+  - Só entra **aparelho autorizado** pelo QR code. O QR vale 10 minutos e serve para um aparelho só. Além disso, a senha continua sendo pedida.
+  - Aparelhos podem ser **desconectados** a qualquer momento.
+  - Apagar dados, testar, restaurar e trocar a planilha **só funcionam no notebook**.
+  - Cada lançamento guarda **de qual aparelho veio**.
+- **Uso simultâneo:**
+  - As gravações acontecem **uma de cada vez**, então dois aparelhos não conseguem tirar mais do que o saldo.
+  - Formulário enviado duas vezes (toque duplo ou Wi-Fi lento) **não registra em dobro**.
+- **Planilha:**
+  - O app relê a planilha sozinho quando ela muda e antes de cada envio.
+  - Avisa quando ela está aberta no Excel ou quando o OneDrive criou uma cópia em conflito.
+- **Limitações:**
+  - O notebook precisa estar ligado, com o app aberto.
+  - Redes que isolam os aparelhos (comum em Wi-Fi de visitante ou de empresa) impedem a conexão. Nesse caso, use o roteador do celular (hotspot) do notebook.
+
 ### Dados e teste (testar antes de usar a planilha real)
 
 Em **Gestão ▸ Dados e teste**:

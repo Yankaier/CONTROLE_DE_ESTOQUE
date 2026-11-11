@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% block conteudo %}
+{{ m.cabecalho('Aparelhos', 'Use o app no celular ao mesmo tempo que no notebook. O celular abre o app deste notebook pela rede Wi-Fi: os dois trabalham no mesmo estoque, sem precisar sincronizar.', 'Gestão') }}
+
+<div class="grid">
+<div class="stack">
+  <section class="card accent">
+    <div class="card-head"><h2>{{ m.ic('celular') }} Acesso pelo celular</h2>
+      {% if rede.ativo %}<span class="chip ok">Ligado</span>{% else %}<span class="chip plain">Desligado</span>{% endif %}</div>
+    <div class="card-body">
+      {% if rede.ativo %}
+        <p>Endereço para o celular: <code>{{ rede.endereco }}</code></p>
+        {% if qr %}
+        <div class="qr-box">
+          <div class="qr">{{ qr|safe }}</div>
+          <ol class="passos">
+            <li>No celular, ligado <b>no mesmo Wi-Fi</b> deste notebook, abra a câmera e aponte para o QR code.</li>
+            <li>O celular vai avisar que a conexão "não é particular". Toque em <b>Avançado ▸ Continuar</b>. Isso acontece porque o certificado foi criado pelo próprio notebook. Para conferir, a impressão digital é <code>{{ rede.impressao }}</code>.</li>
+            <li>Dê um nome ao aparelho (ex.: "Celular do Luis") e digite a senha do app.</li>
+          </ol>
+        </div>
+        <p class="hint">Sem câmera? Digite no navegador do celular: <code>{{ link }}</code></p>
+        <p class="hint">Este QR code vale <b>10 minutos</b> e serve para <b>um aparelho</b>. Para outro aparelho, gere outro.</p>
+        {% else %}
+        <form method="post">{{ m.csrf_field() }}<input type="hidden" name="acao" value="conectar"><button class="btn">{{ m.ic('celular') }} Conectar um celular (mostrar QR code)</button></form>
+        {% endif %}
+      {% else %}
+        <p>Desligado: só este notebook abre o app.</p>
+        {% if rede.erro %}<div class="alert bad">{{ m.ic('erro') }}<span>{{ rede.erro }}</span></div>{% endif %}
+        <p class="hint">Ao ligar pela primeira vez, o Windows pode perguntar se o Python pode usar a rede: marque <b>Redes privadas</b> e clique em <b>Permitir acesso</b>.</p>
+      {% endif %}
+    </div>
+    <div class="card-foot">
+      {% if rede.ativo %}
+        <form method="post" class="inline-form">{{ m.csrf_field() }}<input type="hidden" name="acao" value="desligar"><button class="btn ghost" data-confirm="Desligar o acesso pelo celular?">Desligar acesso pelo celular</button></form>
+      {% else %}
+        <form method="post" class="inline-form">{{ m.csrf_field() }}<input type="hidden" name="acao" value="ligar"><button class="btn">{{ m.ic('celular') }} Ligar acesso pelo celular</button></form>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>{{ m.ic('escudo') }} Como fica protegido</h2></div>
+    <div class="card-body">
+      <ul class="passos">
+        <li><b>Conexão criptografada (HTTPS)</b> entre o celular e o notebook.</li>
+        <li><b>Só aparelho autorizado</b> pelo QR code deste notebook entra. Os outros recebem "aparelho não autorizado", mesmo sabendo a senha.</li>
+        <li>Além disso, <b>a senha</b> do app continua sendo pedida.</li>
+        <li><b>Apagar dados, testar, restaurar e trocar a planilha</b> só funcionam no notebook.</li>
+        <li><b>Cada lançamento guarda de qual aparelho veio</b>, para você saber quem registrou.</li>
+        <li><b>Gravações uma de cada vez</b> e proteção contra registro em dobro (toque duplo ou Wi-Fi lento).</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>{{ m.ic('celular') }} Aparelhos autorizados</h2>
+    {% if lista|selectattr('revogado', 'equalto', 0)|list %}<form method="post" class="inline-form">{{ m.csrf_field() }}<input type="hidden" name="acao" value="revogar_todos"><button class="linkbtn danger" data-confirm="Desconectar todos os aparelhos?">Desconectar todos</button></form>{% endif %}</div>
+  <div class="card-body flush"><div class="list">
+  {% for ap in lista %}
+    <div class="list-item">
+      <span class="qty {{ 'in' if not ap.revogado else 'out' }}" style="min-width:auto">{{ m.ic('celular') }}</span>
+      <span class="title">{{ ap.nome }}</span>
+      {% if ap.revogado %}<span class="chip bad">Desconectado</span>{% else %}<span class="chip ok">Autorizado</span>{% endif %}
+      <span class="sub">Autorizado em {{ ap.criado_em[:16] }}{% if ap.ultimo_uso %} · último uso {{ ap.ultimo_uso[:16] }}{% endif %}{% if ap.ultimo_ip %} · {{ ap.ultimo_ip }}{% endif %}</span>
+      {% if not ap.revogado %}<div class="acts"><form method="post">{{ m.csrf_field() }}<input type="hidden" name="acao" value="revogar"><input type="hidden" name="id" value="{{ ap.id }}"><button class="linkbtn danger" data-confirm="Desconectar {{ ap.nome }}? Ele não abre mais o app.">Desconectar</button></form></div>{% endif %}
+    </div>
+  {% else %}{{ m.vazio('Nenhum celular autorizado ainda.', 'celular') }}{% endfor %}
+  </div></div>
+</section>
+</div>
+{% endblock %}

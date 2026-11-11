@@ -1,6 +1,6 @@
 {# ----- Peças reutilizáveis das telas ----- #}
 {% macro ic(nome, cls='') %}<svg class="icon {{ cls }}" aria-hidden="true"><use href="#i-{{ nome }}"/></svg>{% endmacro %}
-{% macro csrf_field() %}<input type="hidden" name="_csrf" value="{{ csrf }}">{% endmacro %}
+{% macro csrf_field() %}<input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="_uso" value="{{ novo_uso() }}">{% endmacro %}
 
 {# cabeçalho da página: título, descrição e (opcional) botões à direita #}
 {% macro cabecalho(titulo, descricao='', grupo='') %}
@@ -24,7 +24,7 @@
   <span class="qty {{ 'out' if saiu else 'in' }}">{{ '−' if saiu else '+' }}{{ l.qtd|abs }}</span>
   <span class="title"><a href="{{ url_for('mov', item=l.item_id) }}">{{ l.descricao }}</a></span>
   {% if l.estornado_por %}<span class="chip bad">Estornado</span>{% elif l.status == 'lancado' %}<span class="chip ok">Linha {{ (l.linhas or '').split(',')[0] }}{% if ',' in (l.linhas or '') %}+{% endif %}</span>{% else %}<span class="chip warn">Pendente</span>{% endif %}
-  <span class="sub">{{ data_br(l.data) }} · {{ l.movim }} · {{ l.solicitante or 'sem solicitante' }}{% if l.area %} · {{ l.area }}{% endif %}{% if l.os %} · OS {{ l.os }}{% endif %}{% if l.nf %} · NF {{ l.nf }}{% endif %}{% if l.seriais %} · <span class="meta">{{ l.seriais }}</span>{% endif %}{% if l.emprestimo %} · {% if l.devolvido_por %}empréstimo devolvido{% else %}<b>empréstimo até {{ data_br(l.devolver_ate) }}</b>{% endif %}{% endif %}{% if l.obs %} · {{ l.obs }}{% endif %}</span>
+  <span class="sub">{{ data_br(l.data) }} · {{ l.movim }} · {{ l.solicitante or 'sem solicitante' }}{% if l.area %} · {{ l.area }}{% endif %}{% if l.os %} · OS {{ l.os }}{% endif %}{% if l.nf %} · NF {{ l.nf }}{% endif %}{% if l.seriais %} · <span class="meta">{{ l.seriais }}</span>{% endif %}{% if l.emprestimo %} · {% if l.devolvido_por %}empréstimo devolvido{% else %}<b>empréstimo até {{ data_br(l.devolver_ate) }}</b>{% endif %}{% endif %}{% if l.obs %} · {{ l.obs }}{% endif %}{% if l.origem and l.origem != 'Notebook' %} · <span class="chip info plain">{{ l.origem }}</span>{% endif %}</span>
   {% if acoes and not l.estornado_por and not l.estorno_de %}
   <div class="acts">
     {% if l.status == 'pendente' %}

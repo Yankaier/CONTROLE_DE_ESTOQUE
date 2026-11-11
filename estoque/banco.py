@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS lancamentos (
     devolvido_por  INTEGER REFERENCES lancamentos(id),
     estorno_de     INTEGER REFERENCES lancamentos(id),
     estornado_por  INTEGER REFERENCES lancamentos(id),
-    linhas         TEXT    NOT NULL DEFAULT ''   -- linhas na aba Movimentação, ex.: "812,813"
+    linhas         TEXT    NOT NULL DEFAULT '',  -- linhas na aba Movimentação, ex.: "812,813"
+    origem         TEXT    NOT NULL DEFAULT ''   -- aparelho que registrou (Notebook, Celular do Luis…)
 );
 
 CREATE TABLE IF NOT EXISTS pedidos (
@@ -140,6 +141,17 @@ CREATE TABLE IF NOT EXISTS correcoes (
     de       TEXT    NOT NULL   -- JSON com estante/pt/caixa/sku/descricao como estão na planilha
 );
 
+-- celulares/tablets autorizados a abrir o app pela rede (o token fica só como hash)
+CREATE TABLE IF NOT EXISTS aparelhos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome        TEXT    NOT NULL,
+    token_hash  TEXT    NOT NULL UNIQUE,
+    criado_em   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    ultimo_uso  TEXT,
+    ultimo_ip   TEXT    NOT NULL DEFAULT '',
+    revogado    INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS config (
     chave  TEXT PRIMARY KEY,
     valor  TEXT NOT NULL
@@ -149,9 +161,12 @@ CREATE TABLE IF NOT EXISTS config (
 
 def conectar(caminho: str | Path = "estoque.db") -> sqlite3.Connection:
     """Abre (ou cria) o banco e garante que as tabelas existam."""
-    conexao = sqlite3.connect(str(caminho))
+    conexao = sqlite3.connect(str(caminho), timeout=15, check_same_thread=False)
     conexao.row_factory = sqlite3.Row
     conexao.execute("PRAGMA foreign_keys = ON")
+    conexao.execute("PRAGMA busy_timeout = 15000")       # espera o outro aparelho terminar de gravar
+    if str(caminho) != ":memory:":
+        conexao.execute("PRAGMA journal_mode = WAL")      # leituras e gravações ao mesmo tempo
     conexao.executescript(ESQUEMA)
     _migrar(conexao)
     return conexao
@@ -160,7 +175,7 @@ def conectar(caminho: str | Path = "estoque.db") -> sqlite3.Connection:
 # colunas acrescentadas depois da primeira versão (bancos antigos ganham as colunas)
 _COLUNAS_NOVAS = {
     "itens": {"na_planilha": "INTEGER NOT NULL DEFAULT 0", "linha_contagem": "INTEGER"},
-    "lancamentos": {"linhas": "TEXT NOT NULL DEFAULT ''"},
+    "lancamentos": {"linhas": "TEXT NOT NULL DEFAULT ''", "origem": "TEXT NOT NULL DEFAULT ''"},
     "descartes": {c: "TEXT NOT NULL DEFAULT ''" for c in ("origem", "autorizado", "documento", "obs", "baixa")},
 }
 

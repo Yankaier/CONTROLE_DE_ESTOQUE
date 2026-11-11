@@ -80,8 +80,9 @@ def hoje() -> str:
 
 
 class Almoxarifado:
-    def __init__(self, conexao: sqlite3.Connection):
+    def __init__(self, conexao: sqlite3.Connection, origem: str = ""):
         self.db = conexao
+        self.origem = origem          # aparelho que está registrando (fica gravado em cada lançamento)
 
     # ================= Itens =================
 
@@ -229,12 +230,12 @@ class Almoxarifado:
         with self.db:
             cur = self.db.execute(
                 "INSERT INTO lancamentos (criado_em, data, movim, item_id, qtd, seriais, solicitante,"
-                " area, os, nf, obs, status, emprestimo, devolver_ate, devolucao_de, estorno_de)"
+                " area, os, nf, obs, status, emprestimo, devolver_ate, devolucao_de, estorno_de, origem)"
                 " VALUES (COALESCE(?, datetime('now','localtime')), COALESCE(?, date('now','localtime')),"
-                " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (criado_em, data, movim, item_id, qtd, ", ".join(seriais), nome, area.strip(),
                  os.strip(), nf.strip(), obs.strip(), status, int(emprestimo), devolver_ate,
-                 devolucao_de, estorno_de))
+                 devolucao_de, estorno_de, self.origem))
             self.db.execute("UPDATE itens SET saldo = saldo + ? WHERE id = ?", (delta, item_id))
             for s in seriais:
                 if delta > 0:

@@ -1,29 +1,35 @@
 """Versão web do controle de estoque, com as mesmas abas do app "Movimentação do Almoxarifado".
 
-Privado: roda no seu computador, só aceita conexões da própria máquina (a não ser
-que você ligue o modo rede) e todas as páginas pedem login com a sua senha.
+Privado: roda no notebook e todas as páginas pedem a senha. O celular só entra pela
+rede Wi-Fi, com conexão criptografada (HTTPS) e depois de ser autorizado no notebook
+(tela Aparelhos). Vários aparelhos usam o mesmo banco ao mesmo tempo; as gravações
+acontecem uma de cada vez.
 """
 
 import csv
 import functools
+import hashlib
 import hmac
 import io
 import os
 import secrets
+import threading
 import time
 from datetime import date, timedelta
 from pathlib import Path
 
 from flask import (Flask, abort, flash, g, redirect, render_template, request, send_file, session,
                    url_for)
+from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .. import dados as dados_app
 from ..banco import conectar
 from ..planilha import exportar_dia
 from ..servico import CHECKLIST_TERMINAL, Almoxarifado, ErroEstoque, hoje
-from ..sincronizar import enviar_para_planilha, gravar_arquivo, trazer_da_planilha
+from ..sincronizar import avisos_planilha, enviar_para_planilha, gravar_arquivo, trazer_da_planilha
 from ..xlsx import ErroPlanilha, Planilha
+from .rede import ServidorRede
 
 ABAS = [("inicio", "Início"), ("mov", "Movimentação"), ("pedidos", "Pedidos"), ("inventario", "Inventário")]
 MAIS = [("descarte", "Descarte"), ("dia", "Movimento do dia"), ("terminais", "Terminais"),
@@ -31,27 +37,70 @@ MAIS = [("descarte", "Descarte"), ("dia", "Movimento do dia"), ("terminais", "Te
 LOCAIS = {"127.0.0.1", "::1", "localhost"}
 
 
+COOKIE_APARELHO = "estoque_aparelho"
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+class _SessaoSegura(SecureCookieSessionInterface):
+    """Cookie de sessão com a marca "Secure" quando a conexão é HTTPS (celular)."""
+
+    def get_cookie_secure(self, app):
+        return request.is_secure
+
+
 def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
+    """Cria o app. `rede=True` liga o acesso pelo celular (HTTPS) assim que o app abre."""
     app = Flask(__name__)
+    app.session_interface = _SessaoSegura()
     app.config["BANCO"] = str(Path(caminho_banco).resolve())
-    app.config["REDE"] = rede
     c = conectar(app.config["BANCO"])
     try:
         a0 = Almoxarifado(c)
         if not a0.config("segredo"):
             a0.definir_config("segredo", secrets.token_hex(32))
         app.secret_key = a0.config("segredo")
+        rede_ligada = rede or a0.config("rede_ativa") == "1"
     finally:
         c.close()
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict",
                       PERMANENT_SESSION_LIFETIME=timedelta(hours=12), MAX_CONTENT_LENGTH=60 * 1024 * 1024)
     tentativas: dict[str, list[float]] = {}
+    trava_gravacao = threading.RLock()          # uma gravação por vez, venha de qual aparelho vier
+    usados: dict[str, float] = {}               # formulários já enviados (evita registro em dobro)
+    trava_usados = threading.Lock()
+    pareamentos: dict[str, float] = {}          # QR codes de conexão ainda válidos -> expira em
+    estado = {"mtime": None, "erro_trazer": ""}
+    servidor_rede = ServidorRede(app, Path(app.config["BANCO"]).parent)
+    app.extensions["rede"] = servidor_rede
+    if rede_ligada:
+        try:
+            servidor_rede.iniciar()
+        except Exception as e:                     # o app local abre mesmo se a rede falhar
+            servidor_rede.erro = str(e)
 
     # ---------------- infraestrutura ----------------
     def alm() -> Almoxarifado:
         if "alm" not in g:
-            g.alm = Almoxarifado(conectar(app.config["BANCO"]))
+            g.alm = Almoxarifado(conectar(app.config["BANCO"]), origem=g.get("origem", ""))
         return g.alm
+
+    def eh_local() -> bool:
+        return request.remote_addr in LOCAIS
+
+    def aparelho_atual():
+        token = request.cookies.get(COOKIE_APARELHO, "")
+        if not token:
+            return None
+        a = alm()
+        ap = a.db.execute("SELECT * FROM aparelhos WHERE token_hash = ? AND revogado = 0", (_hash(token),)).fetchone()
+        if ap:
+            with a.db:
+                a.db.execute("UPDATE aparelhos SET ultimo_uso = datetime('now','localtime'), ultimo_ip = ? WHERE id = ?",
+                             (request.remote_addr or "", ap["id"]))
+        return ap
 
     @app.teardown_appcontext
     def fechar(_):
@@ -59,24 +108,90 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
         if a:
             a.db.close()
 
+    @app.teardown_request
+    def soltar_trava(_):
+        if g.pop("trava", False):
+            trava_gravacao.release()
+
     @app.before_request
     def proteger():
-        if not app.config["REDE"] and request.remote_addr not in LOCAIS:
-            abort(403)
-        livre = request.endpoint in ("login", "primeiro_acesso", "static")
+        if request.endpoint == "static":
+            return None
+        if eh_local():
+            g.origem = "Notebook"
+        else:
+            # de fora deste computador: só pelo servidor HTTPS da rede e só aparelho autorizado
+            if not request.is_secure or not servidor_rede.ativo:
+                abort(403)
+            if request.endpoint != "parear":
+                ap = aparelho_atual()
+                if not ap:
+                    session.clear()
+                    return render_template("bloqueado.html"), 403
+                g.origem = ap["nome"]
+                g.aparelho_id = ap["id"]
+        if "alm" in g:
+            g.alm.origem = g.get("origem", "")
+        livre = request.endpoint in ("login", "primeiro_acesso", "parear")
         if not alm().config("senha_hash"):
-            if request.endpoint not in ("primeiro_acesso", "static"):
+            if request.endpoint != "primeiro_acesso":
                 return redirect(url_for("primeiro_acesso"))
             return None
         if not livre and not session.get("ok"):
             return redirect(url_for("login", proximo=request.full_path if request.method == "GET" else None))
+        if session.get("ok") and not eh_local() and session.get("aparelho") != g.get("aparelho_id"):
+            session.clear()                       # sessão de outro aparelho: entra de novo
+            return redirect(url_for("login"))
         if request.method == "POST":
             token = request.form.get("_csrf", "")
             if not hmac.compare_digest(token, session.get("csrf", "")):
                 abort(400, "Formulário expirado. Volte, recarregue a página e tente de novo.")
+            uso = request.form.get("_uso", "")
+            if uso:
+                agora = time.time()
+                with trava_usados:
+                    if uso in usados:
+                        flash("Esse formulário já tinha sido enviado (toque duplo ou conexão lenta). "
+                              "Não registrei de novo.", "warn")
+                        ref = request.referrer or ""
+                        return redirect(ref if ref.startswith(request.host_url) else url_for("inicio"))
+                    usados[uso] = agora
+                    if len(usados) > 5000:
+                        for k in [k for k, t in usados.items() if t < agora - 86400]:
+                            usados.pop(k, None)
+            trava_gravacao.acquire()
+            g.trava = True
+        elif session.get("ok") and request.endpoint in ("inicio", "mov", "pedidos", "planilha", "dia", "inventario"):
+            trazer_se_mudou()
+
+    def trazer_se_mudou():
+        """Se alguém mexeu na planilha (Excel, outro app), traz as linhas novas antes de mostrar a tela."""
+        a = alm()
+        caminho = a.config("planilha")
+        if not caminho:
+            return
+        try:
+            mtime = Path(caminho).stat().st_mtime
+        except OSError:
+            return
+        if estado["mtime"] == (caminho, mtime):
+            return
+        with trava_gravacao:
+            try:
+                r = trazer_da_planilha(a, Path(caminho).read_bytes())
+                estado["erro_trazer"] = ""
+                if r["movimentos"] or r["itens_novos"] or r["descartes"]:
+                    flash(f"Atualizado da planilha: {r['movimentos']} linha(s) nova(s) de movimentação"
+                          f"{', ' + str(r['itens_novos']) + ' item(ns) novo(s)' if r['itens_novos'] else ''}.", "ok")
+            except Exception as e:     # planilha aberta/sincronizando: tenta de novo na próxima tela
+                estado["erro_trazer"] = str(e)
+                return
+            estado["mtime"] = (caminho, mtime)
 
     @app.after_request
     def cabecalhos(resp):
+        if request.is_secure:
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000"
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Referrer-Policy"] = "same-origin"
@@ -90,13 +205,16 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
     def contexto():
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
-        dados = {"csrf": session["csrf"], "ABAS": ABAS, "MAIS": MAIS, "aba": getattr(g, "aba", ""), "hoje": hoje()}
+        dados = {"csrf": session["csrf"], "ABAS": ABAS, "MAIS": MAIS, "aba": getattr(g, "aba", ""), "hoje": hoje(),
+                 "novo_uso": lambda: secrets.token_urlsafe(16), "local": eh_local(), "origem": g.get("origem", "")}
         if session.get("ok"):
             a = alm()
             p = a.pendentes()
             dados.update(pend=p, pend_total=p["lancamentos"] + p["itens_novos"] + p["correcoes"],
                          planilha=a.config("planilha"), n_pedidos=len(a.pedidos(abertos=True)),
-                         usuario=a.config("usuario", ""), modo_teste=dados_app.em_teste(a))
+                         usuario=a.config("usuario", ""), modo_teste=dados_app.em_teste(a),
+                         rede_ativa=servidor_rede.ativo, avisos_planilha=avisos_planilha(a.config("planilha")),
+                         erro_trazer=estado["erro_trazer"])
         return dados
 
     def aba(nome):
@@ -189,6 +307,8 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
                 proximo = request.form.get("proximo") or ""
                 session.clear()
                 session["ok"], session.permanent = True, True
+                if not eh_local():
+                    session["aparelho"] = g.get("aparelho_id")
                 return redirect(proximo if proximo.startswith("/") and not proximo.startswith("//") else url_for("inicio"))
             else:
                 recentes.append(time.time())
@@ -525,6 +645,8 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
         info = None
         if request.method == "POST":
             acao = request.form.get("acao")
+            if acao in ("config", "upload") and not eh_local():
+                raise ErroEstoque("A planilha só pode ser trocada ou configurada no próprio notebook.")
             if acao == "config":
                 caminho = request.form.get("caminho", "").strip().strip('"')
                 if caminho:
@@ -590,6 +712,80 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
         return render_template("planilha.html", caminho=caminho, info=info, auto=a.config("auto_enviar") == "1",
                                pendentes=[dict(x) for x in pend_l], planilha_real=a.config("planilha_real"))
 
+    # ---------------- Aparelhos (acesso pelo celular) ----------------
+    @app.route("/aparelhos", methods=["GET", "POST"])
+    @aba("aparelhos")
+    def aparelhos():
+        if not eh_local():
+            abort(403, "Aparelhos só podem ser autorizados no próprio notebook.")
+        a = alm()
+        qr = link = None
+        if request.method == "POST":
+            acao = request.form.get("acao")
+            if acao == "ligar":
+                try:
+                    servidor_rede.iniciar()
+                except Exception as e:
+                    raise ErroEstoque(f"Não consegui ligar o acesso pela rede: {e}") from None
+                a.definir_config("rede_ativa", "1")
+                flash(f"Acesso pelo celular ligado em {servidor_rede.endereco}.", "ok")
+            elif acao == "desligar":
+                servidor_rede.parar()
+                a.definir_config("rede_ativa", "0")
+                pareamentos.clear()
+                flash("Acesso pelo celular desligado. Só este notebook abre o app agora.", "ok")
+            elif acao == "conectar":
+                if not servidor_rede.ativo:
+                    raise ErroEstoque("Ligue o acesso pelo celular primeiro.")
+                token = secrets.token_urlsafe(24)
+                agora = time.time()
+                for k in [k for k, t in pareamentos.items() if t < agora]:
+                    pareamentos.pop(k, None)
+                pareamentos[token] = agora + 600          # vale 10 minutos e só uma vez
+                session["qr_token"] = token
+                return redirect(url_for("aparelhos", qr=1))
+            elif acao == "revogar":
+                with a.db:
+                    a.db.execute("UPDATE aparelhos SET revogado = 1 WHERE id = ?", (int(request.form["id"]),))
+                flash("Aparelho desconectado. Ele não abre mais o app.", "ok")
+            elif acao == "revogar_todos":
+                with a.db:
+                    a.db.execute("UPDATE aparelhos SET revogado = 1")
+                pareamentos.clear()
+                flash("Todos os aparelhos foram desconectados.", "ok")
+            else:
+                abort(404)
+            return redirect(url_for("aparelhos"))
+        token = session.get("qr_token")
+        if request.args.get("qr") and token and pareamentos.get(token, 0) > time.time() and servidor_rede.ativo:
+            import qrcode
+            import qrcode.image.svg
+            link = f"{servidor_rede.endereco}/parear/{token}"
+            qr = qrcode.make(link, image_factory=qrcode.image.svg.SvgPathImage, box_size=12, border=2).to_string(encoding="unicode")
+        lista = [dict(r) for r in a.db.execute("SELECT * FROM aparelhos ORDER BY revogado, id DESC")]
+        return render_template("aparelhos.html", rede=servidor_rede, lista=lista, qr=qr, link=link)
+
+    @app.route("/parear/<token>", methods=["GET", "POST"])
+    def parear(token):
+        """O celular abre o link do QR code e passa a ser um aparelho autorizado."""
+        validade = pareamentos.get(token, 0)
+        if validade < time.time():
+            return render_template("bloqueado.html", expirado=True), 403
+        if request.method == "POST":
+            nome = (request.form.get("nome") or "").strip()[:40] or "Celular"
+            if pareamentos.pop(token, 0) < time.time():          # só uma vez
+                return render_template("bloqueado.html", expirado=True), 403
+            segredo = secrets.token_urlsafe(32)
+            a = alm()
+            with a.db:
+                a.db.execute("INSERT INTO aparelhos (nome, token_hash, ultimo_uso, ultimo_ip) VALUES (?, ?, datetime('now','localtime'), ?)",
+                             (nome, _hash(segredo), request.remote_addr or ""))
+            resp = redirect(url_for("login"))
+            resp.set_cookie(COOKIE_APARELHO, segredo, max_age=400 * 86400, httponly=True, secure=True, samesite="Strict")
+            flash(f"{nome} autorizado. Agora digite a senha do app.", "ok")
+            return resp
+        return render_template("parear.html", token=token)
+
     # ---------------- Dados e teste ----------------
     def conferir_senha():
         if not check_password_hash(alm().config("senha_hash"), request.form.get("senha", "")):
@@ -598,6 +794,8 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
     @app.route("/dados", methods=["GET", "POST"])
     @aba("dados")
     def dados():
+        if not eh_local():
+            abort(403, "Apagar, restaurar e testar só podem ser feitos no próprio notebook.")
         a, banco = alm(), app.config["BANCO"]
         if request.method == "POST":
             acao = request.form.get("acao")
@@ -646,6 +844,8 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
 
     @app.route("/dados/copia/<nome>")
     def baixar_copia(nome):
+        if not eh_local():
+            abort(403)
         arq = dados_app.pasta_copias(app.config["BANCO"]) / Path(nome).name
         if not arq.is_file():
             abort(404)

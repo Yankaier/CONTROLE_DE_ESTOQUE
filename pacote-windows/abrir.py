@@ -38,6 +38,10 @@ def main() -> int:
     print("=" * 60)
     print(f" Aberto em: {URL}")
     print(f" Seus dados ficam em: {dados}")
+    rede = app.extensions["rede"]
+    if rede.ativo:
+        print(f" Celular (mesmo Wi-Fi): {rede.endereco}")
+    print(" Para usar no celular: no app, Gestão > Aparelhos.")
     print()
     print(" Deixe esta janela aberta enquanto usa o app.")
     print(" Para fechar o app, feche esta janela.")

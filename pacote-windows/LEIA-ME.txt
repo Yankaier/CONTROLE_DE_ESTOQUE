@@ -13,6 +13,15 @@ COMO USAR
 
 Opcional: clique duas vezes em Criar atalho na Area de Trabalho.bat para ter um icone.
 
+USAR NO CELULAR AO MESMO TEMPO
+- No app (notebook), va em Gestao > Aparelhos > Ligar acesso pelo celular.
+- Na primeira vez o Windows pergunta se o Python pode usar a rede: marque Redes privadas
+  e clique em Permitir acesso.
+- Clique em Conectar um celular e leia o QR code com o celular (no mesmo Wi-Fi).
+- O celular avisa que a conexao nao e particular: toque em Avancado > Continuar
+  (o certificado foi criado pelo proprio notebook). Depois digite a senha do app.
+- O notebook precisa ficar ligado com o app aberto.
+
 BOM SABER
 - Nao precisa instalar nada: o Python ja vem dentro da pasta python.
 - Deixe a janela preta aberta enquanto usa o app. Fechou a janela, o app fecha.

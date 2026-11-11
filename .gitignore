@@ -9,3 +9,8 @@ planilha/
 backups-estoque/
 *.xlsx
 *.zip
+*.db-wal
+*.db-shm
+*.pem
+copias-dados/
+teste/

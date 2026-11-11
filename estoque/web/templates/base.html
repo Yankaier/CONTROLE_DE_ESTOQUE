@@ -14,13 +14,13 @@
 {% set GRUPOS = [
   ('Operação', [('inicio', 'Início', 'inicio'), ('mov', 'Movimentação', 'mov'), ('pedidos', 'Pedidos', 'pedidos'), ('inventario', 'Inventário', 'inventario')]),
   ('Registros', [('descarte', 'Descarte', 'descarte'), ('dia', 'Movimento do dia', 'dia'), ('terminais', 'Terminais', 'terminais')]),
-  ('Gestão', [('relatorios', 'Relatórios', 'relatorios'), ('pessoas', 'Pessoas', 'pessoas'), ('planilha', 'Planilha', 'planilha'), ('dados', 'Dados e teste', 'teste')]),
+  ('Gestão', [('relatorios', 'Relatórios', 'relatorios'), ('pessoas', 'Pessoas', 'pessoas'), ('planilha', 'Planilha', 'planilha')] + ([('aparelhos', 'Aparelhos', 'celular'), ('dados', 'Dados e teste', 'teste')] if local else [])),
 ] %}
 {% macro menu() %}
 <nav class="nav" aria-label="Áreas do app">
   {% for titulo, links in GRUPOS %}
   <div class="nav-group"><span class="nav-title">{{ titulo }}</span>
-    {% for k, nome, icone in links %}<a href="{{ url_for(k) }}" class="{{ 'on' if aba == k }}" {% if aba == k %}aria-current="page"{% endif %}>{{ m.ic(icone) }}<span>{{ nome }}</span>{% if k == 'pedidos' and n_pedidos %}<span class="count">{{ n_pedidos }}</span>{% elif k == 'planilha' and pend_total %}<span class="count">{{ pend_total }}</span>{% elif k == 'dados' and modo_teste %}<span class="count">teste</span>{% endif %}</a>{% endfor %}
+    {% for k, nome, icone in links %}<a href="{{ url_for(k) }}" class="{{ 'on' if aba == k }}" {% if aba == k %}aria-current="page"{% endif %}>{{ m.ic(icone) }}<span>{{ nome }}</span>{% if k == 'pedidos' and n_pedidos %}<span class="count">{{ n_pedidos }}</span>{% elif k == 'planilha' and pend_total %}<span class="count">{{ pend_total }}</span>{% elif k == 'dados' and modo_teste %}<span class="count">teste</span>{% elif k == 'aparelhos' and rede_ativa %}<span class="count">ligado</span>{% endif %}</a>{% endfor %}
   </div>
   {% endfor %}
 </nav>
@@ -42,6 +42,8 @@
     <header class="topbar">
       <div class="topbar-title">{% if modo_teste %}<span class="chip warn plain">Teste</span>{% endif %}{{ m.ic('planilha') }}<span>Planilha:</span> <b>{{ (planilha or 'não configurada').replace('\\', '/').split('/')[-1] }}</b></div>
       <div class="sync">
+        {% if avisos_planilha %}<a class="chip bad" href="{{ url_for('planilha') }}" title="{{ avisos_planilha|join(' ') }}">Atenção na planilha</a>{% endif %}
+        {% if local and rede_ativa %}<a class="chip info" href="{{ url_for('aparelhos') }}">Celular ligado</a>{% elif not local %}<span class="chip info">{{ origem }}</span>{% endif %}
         {% if not planilha %}<a class="chip bad" href="{{ url_for('planilha') }}">Planilha não configurada</a>
         {% elif pend_total %}<a class="chip warn" href="{{ url_for('planilha') }}">{{ pend_total }} pendente(s)</a>
         <form method="post" action="{{ url_for('planilha') }}">{{ m.csrf_field() }}<input type="hidden" name="acao" value="enviar"><button class="btn small">{{ m.ic('enviar') }} Enviar à planilha</button></form>

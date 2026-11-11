@@ -132,7 +132,7 @@ def criar_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("web", help="abre a versão web (privada, com senha)")
     p.add_argument("--porta", type=int, default=5000)
     p.add_argument("--rede", action="store_true",
-                   help="aceita acesso de outros aparelhos da rede (celular/tablet); continua pedindo senha")
+                   help="liga o acesso pelo celular (HTTPS, só aparelhos autorizados) ao abrir")
 
     sub.add_parser("alertas", help="itens no mínimo ou abaixo e empréstimos atrasados")
     sub.add_parser("resumo", help="resumo geral")
@@ -255,10 +255,11 @@ def iniciar_web(args) -> int:
         print("A versão web precisa do Flask. Instale com:  pip install -r requirements.txt", file=sys.stderr)
         return 1
     app = criar_app(args.banco, rede=args.rede)
-    host = "0.0.0.0" if args.rede else "127.0.0.1"
+    host = "127.0.0.1"
     print(f"Abra no navegador: http://127.0.0.1:{args.porta}")
-    if args.rede:
-        print("Modo rede ligado: outros aparelhos da mesma rede podem abrir pelo IP deste computador (com senha).")
+    rede = app.extensions["rede"]
+    if rede.ativo:
+        print(f"Celular (mesmo Wi-Fi, aparelho autorizado em Aparelhos): {rede.endereco}")
     app.run(host=host, port=args.porta, debug=False)
     return 0
 

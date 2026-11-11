@@ -60,9 +60,11 @@ class TestWeb(unittest.TestCase):
     def test_fluxo_completo_com_planilha(self):
         self.entrar()
         r = self.post("/planilha", acao="config", caminho=str(self.xlsx), auto="1")
-        self.assertIn("Configuração salva", r.get_data(as_text=True))
+        txt = r.get_data(as_text=True)
+        self.assertIn("Configuração salva", txt)
+        self.assertIn("Atualizado da planilha: 4 linha(s) nova(s)", txt)      # leu a planilha sozinho
         r = self.post("/planilha", acao="trazer")
-        self.assertIn("2 item(ns) novo(s), 4 linha(s)", r.get_data(as_text=True))
+        self.assertIn("0 linha(s) nova(s)", r.get_data(as_text=True))           # nada em dobro
         for url in ("/", "/mov", "/mov?q=cabo", "/mov?item=1", "/mov?tipo=entrada&item=2", "/mov/nf", "/itens/novo",
                     "/itens/1/corrigir", "/pedidos", "/inventario?estante=3", "/descarte", "/dia", "/terminais",
                     "/relatorios", "/pessoas", "/planilha", "/senha", "/mov?f=minimo"):

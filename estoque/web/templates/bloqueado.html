@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block titulo %}Aparelho não autorizado · Controle de Estoque{% endblock %}
+{% block acesso %}
+<div class="card accent">
+  <div class="card-head"><div class="brand"><span class="brand-mark">{{ m.ic('caixa', 'lg') }}</span><span class="brand-text"><b>Almoxarifado</b><span>Acesso pela rede</span></span></div></div>
+  <div class="card-body">
+    {% if expirado %}
+    <div class="alert warn">{{ m.ic('alerta') }}<span>Este QR code já foi usado ou passou dos 10 minutos.</span></div>
+    {% else %}
+    <div class="alert bad">{{ m.ic('escudo') }}<span>Este aparelho não está autorizado a abrir o app.</span></div>
+    {% endif %}
+    <p>No notebook, abra <b>Aparelhos ▸ Conectar um celular</b> e leia o QR code com este aparelho.</p>
+  </div>
+</div>
+{% endblock %}
