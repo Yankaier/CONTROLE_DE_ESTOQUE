@@ -15,7 +15,11 @@ Uma versão web com as **mesmas abas do app**: Início, Movimentação, Pedidos,
 
 ### Abrir
 
-No Windows, dê dois cliques em **`iniciar.bat`**. Na primeira vez ele prepara tudo (precisa do
+**Sem instalar nada (Windows):** baixe o `EstoqueAlmoxarifado.zip`, extraia e dê dois cliques em
+**Abrir Controle de Estoque.bat**. O Python já vem dentro da pasta. Para gerar o zip de novo com o
+código atual: `pacote-windows/empacotar.sh`.
+
+Com Python instalado: no Windows, dê dois cliques em **`iniciar.bat`**. Na primeira vez ele prepara tudo (precisa do
 Python instalado) e abre o navegador em `http://127.0.0.1:5000`. No Linux ou Mac, use `./iniciar.sh`.
 
 Pelo terminal:

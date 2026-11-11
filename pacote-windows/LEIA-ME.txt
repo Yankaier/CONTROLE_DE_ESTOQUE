@@ -1,0 +1,28 @@
+CONTROLE DE ESTOQUE - ALMOXARIFADO
+==================================
+
+COMO USAR
+1. Extraia este .zip para uma pasta do computador, por exemplo C:\EstoqueAlmoxarifado.
+   Importante: clique com o botao direito no .zip > Extrair Tudo. Nao rode de dentro do .zip.
+2. Clique duas vezes em Abrir Controle de Estoque.bat.
+   O navegador abre sozinho em http://127.0.0.1:5000
+3. No primeiro acesso, crie a sua senha (8 caracteres ou mais).
+4. Va em Mais > Planilha e informe o arquivo CONTROLE DE ESTOQUES 2.0.xlsx
+   (o da pasta sincronizada do SharePoint/OneDrive) e marque Enviar automaticamente.
+   Na primeira vez, clique em Trazer da planilha para carregar itens e movimentacoes.
+
+Opcional: clique duas vezes em Criar atalho na Area de Trabalho.bat para ter um icone.
+
+BOM SABER
+- Nao precisa instalar nada: o Python ja vem dentro da pasta python.
+- Deixe a janela preta aberta enquanto usa o app. Fechou a janela, o app fecha.
+- So este computador acessa o app, e ele sempre pede a sua senha.
+- Seus dados ficam em %LOCALAPPDATA%\EstoqueAlmoxarifado (fora do OneDrive, de proposito).
+- Antes de cada envio para a planilha, uma copia de seguranca vai para a pasta
+  backups-estoque ao lado da planilha (ficam as 30 ultimas).
+- Feche a planilha no Excel antes de enviar. Se estiver aberta, o registro fica pendente
+  e voce envia depois pelo botao Enviar a planilha.
+- Se o Windows mostrar O Windows protegeu o computador, clique em Mais informacoes
+  > Executar assim mesmo (aparece porque o arquivo veio da internet).
+
+Codigo-fonte: https://github.com/Yankaier/CONTROLE_DE_ESTOQUE
