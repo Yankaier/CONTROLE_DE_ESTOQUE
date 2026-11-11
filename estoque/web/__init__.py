@@ -18,6 +18,7 @@ from flask import (Flask, abort, flash, g, redirect, render_template, request, s
                    url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from .. import dados as dados_app
 from ..banco import conectar
 from ..planilha import exportar_dia
 from ..servico import CHECKLIST_TERMINAL, Almoxarifado, ErroEstoque, hoje
@@ -95,7 +96,7 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
             p = a.pendentes()
             dados.update(pend=p, pend_total=p["lancamentos"] + p["itens_novos"] + p["correcoes"],
                          planilha=a.config("planilha"), n_pedidos=len(a.pedidos(abertos=True)),
-                         usuario=a.config("usuario", ""))
+                         usuario=a.config("usuario", ""), modo_teste=dados_app.em_teste(a))
         return dados
 
     def aba(nome):
@@ -531,9 +532,10 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
                     if not p.is_file():
                         raise ErroPlanilha(f"Não achei o arquivo {p}. Confira o caminho (inclua o nome .xlsx).")
                     Planilha(p.read_bytes()).ler()
-                    a.definir_config("planilha", str(p.resolve()))
+                    a.definir_config("planilha_real" if dados_app.em_teste(a) else "planilha", str(p.resolve()))
                 a.definir_config("auto_enviar", "1" if request.form.get("auto") == "1" else "0")
-                flash("Configuração salva.", "ok")
+                flash("Configuração salva." + (" Em modo teste: esse caminho será usado quando você encerrar o teste."
+                                               if dados_app.em_teste(a) and caminho else ""), "ok")
             elif acao == "upload":
                 arq = request.files.get("arquivo")
                 if not arq or not arq.filename.lower().endswith(".xlsx"):
@@ -586,7 +588,69 @@ def criar_app(caminho_banco: str = "estoque.db", rede: bool = False) -> Flask:
             "SELECT l.*, i.descricao FROM lancamentos l JOIN itens i ON i.id = l.item_id WHERE l.status = 'pendente'"
             " ORDER BY l.criado_em LIMIT 200").fetchall()
         return render_template("planilha.html", caminho=caminho, info=info, auto=a.config("auto_enviar") == "1",
-                               pendentes=[dict(x) for x in pend_l])
+                               pendentes=[dict(x) for x in pend_l], planilha_real=a.config("planilha_real"))
+
+    # ---------------- Dados e teste ----------------
+    def conferir_senha():
+        if not check_password_hash(alm().config("senha_hash"), request.form.get("senha", "")):
+            raise ErroEstoque("Senha incorreta. Nada foi alterado.")
+
+    @app.route("/dados", methods=["GET", "POST"])
+    @aba("dados")
+    def dados():
+        a, banco = alm(), app.config["BANCO"]
+        if request.method == "POST":
+            acao = request.form.get("acao")
+            if acao == "copia":
+                c = dados_app.salvar_copia(a, banco, "manual")
+                flash(f"Cópia de segurança salva: {c.name}.", "ok")
+            elif acao == "apagar":
+                if request.form.get("confirmacao", "").strip().upper() != "APAGAR":
+                    raise ErroEstoque('Para apagar, digite APAGAR no campo de confirmação.')
+                conferir_senha()
+                c = dados_app.salvar_copia(a, banco, "antes de apagar")
+                antes = dados_app.apagar_dados(a)
+                flash(f"Dados apagados ({antes['itens']} item(ns), {antes['lancamentos']} lançamento(s), "
+                      f"{antes['pedidos']} pedido(s)). Se precisar, restaure a cópia {c.name}.", "ok")
+            elif acao == "restaurar":
+                conferir_senha()
+                nome = request.form.get("nome", "")
+                dados_app.restaurar_copia(a, banco, nome)
+                flash(f"Dados restaurados da cópia {nome}. O estado anterior também foi guardado como cópia.", "ok")
+            elif acao == "iniciar_teste":
+                arq = request.files.get("arquivo")
+                if not arq or not arq.filename.lower().endswith(".xlsx"):
+                    raise ErroPlanilha("Escolha a planilha de teste (.xlsx).")
+                r = dados_app.iniciar_teste(a, banco, arq.filename, arq.read(), apagar=request.form.get("apagar") == "1")
+                flash(f"Modo teste ligado com {r['arquivo'].name}: {r['itens_novos']} item(ns) e {r['movimentos']} "
+                      "linha(s) de movimentação carregados. A planilha real não será alterada.", "ok")
+                return redirect(url_for("inicio"))
+            elif acao == "encerrar_teste":
+                conferir_senha()
+                r = dados_app.encerrar_teste(a, banco, apagar=request.form.get("apagar") == "1",
+                                             trazer_real=request.form.get("trazer") == "1")
+                if r["trazido"]:
+                    t = r["trazido"]
+                    flash(f"Teste encerrado. Planilha real conectada: {t['itens_novos']} item(ns) e {t['movimentos']} "
+                          "linha(s) de movimentação trazidos.", "ok")
+                elif r["planilha"]:
+                    flash("Teste encerrado. Planilha real conectada de novo.", "ok")
+                else:
+                    flash("Teste encerrado. Agora configure a planilha real em Planilha.", "warn")
+                    return redirect(url_for("planilha"))
+            else:
+                abort(404)
+            return redirect(url_for("dados"))
+        return render_template("dados.html", contagem=dados_app.contar(a), copias=dados_app.listar_copias(banco),
+                               planilha_real=a.config("planilha_real"), pasta_dados=str(Path(banco).parent))
+
+    @app.route("/dados/copia/<nome>")
+    def baixar_copia(nome):
+        arq = dados_app.pasta_copias(app.config["BANCO"]) / Path(nome).name
+        if not arq.is_file():
+            abort(404)
+        return send_file(io.BytesIO(arq.read_bytes()), as_attachment=True, download_name=arq.name,
+                         mimetype="application/octet-stream")
 
     @app.route("/planilha/baixar")
     def planilha_baixar():

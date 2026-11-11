@@ -1,3 +1,4 @@
+import io
 import re
 import tempfile
 import unittest
@@ -103,6 +104,45 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(self.c.get("/dia.csv?data=2026-11-10").status_code, 200)
         self.assertEqual(self.c.get("/planilha/baixar").status_code, 200)
         self.assertEqual(self.c.get("/relatorios/compras.csv").status_code, 200)
+
+    def test_dados_apagar_exige_confirmacao_e_senha(self):
+        self.entrar()
+        self.post("/planilha", acao="config", caminho=str(self.xlsx))
+        self.post("/planilha", acao="trazer")
+        self.assertEqual(self.c.get("/dados").status_code, 200)
+        r = self.post("/dados", acao="apagar", confirmacao="apagar", senha="errada")
+        self.assertIn("Senha incorreta", r.get_data(as_text=True))
+        r = self.post("/dados", acao="apagar", confirmacao="nao", senha="senha-forte-1")
+        self.assertIn("digite APAGAR", r.get_data(as_text=True))
+        self.assertIn("CABO DE REDE CAT6", self.c.get("/mov?q=cabo").get_data(as_text=True))
+        r = self.post("/dados", acao="apagar", confirmacao="APAGAR", senha="senha-forte-1")
+        txt = r.get_data(as_text=True)
+        self.assertIn("Dados apagados (2 item(ns)", txt)
+        self.assertIn("antes de apagar", txt)                       # cópia aparece na lista
+        self.assertNotIn("CABO DE REDE CAT6", self.c.get("/mov?q=cabo").get_data(as_text=True))
+        nome = re.search(r'name="nome" value="([^"]+)"', txt).group(1)
+        self.assertEqual(self.c.get(f"/dados/copia/{nome}").status_code, 200)
+        self.post("/dados", acao="restaurar", nome=nome, senha="senha-forte-1")
+        self.assertIn("CABO DE REDE CAT6", self.c.get("/mov?q=cabo").get_data(as_text=True))
+
+    def test_modo_teste_pela_tela(self):
+        self.entrar()
+        self.post("/planilha", acao="config", caminho=str(self.xlsx), auto="1")
+        original = self.xlsx.read_bytes()
+        r = self.c.post("/dados", data={"_csrf": self.csrf("/dados"), "acao": "iniciar_teste", "apagar": "1",
+                                        "arquivo": (io.BytesIO(gerar()), "copia da nuvem.xlsx")},
+                        content_type="multipart/form-data", follow_redirects=True)
+        txt = r.get_data(as_text=True)
+        self.assertIn("Modo teste ligado", txt)
+        self.assertIn("Modo teste.", txt)                                # faixa em todas as telas
+        r = self.post("/mov/registrar", origem="/mov?item=2", tipo="saida", item="2", serial="818EZ001", qtd="1")
+        self.assertIn("Lançado na planilha", r.get_data(as_text=True))  # envio automático foi para o teste
+        self.assertEqual(self.xlsx.read_bytes(), original)              # a real não mudou
+        r = self.post("/dados", acao="encerrar_teste", apagar="1", trazer="1", senha="senha-forte-1")
+        txt = r.get_data(as_text=True)
+        self.assertIn("Teste encerrado. Planilha real conectada", txt)
+        self.assertNotIn("Modo teste.", txt)
+        self.assertEqual(self.xlsx.read_bytes(), original)
 
     def test_erro_de_regra_volta_com_mensagem(self):
         self.entrar()

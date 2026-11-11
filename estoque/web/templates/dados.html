@@ -1,0 +1,82 @@
+{% extends "base.html" %}{% block conteudo %}
+{{ m.cabecalho('Dados e teste', 'Apague os dados do app, guarde e restaure cópias, e teste com uma planilha separada antes de usar a planilha real da nuvem.', 'Gestão') }}
+
+<section class="stats" aria-label="O que existe no app agora">
+  <div class="stat info"><span class="stat-icon">{{ m.ic('caixa', 'lg') }}</span><span><span class="n">{{ contagem.itens }}</span><span class="l">itens</span></span></div>
+  <div class="stat"><span class="stat-icon">{{ m.ic('mov', 'lg') }}</span><span><span class="n">{{ contagem.lancamentos }}</span><span class="l">lançamentos</span></span></div>
+  <div class="stat"><span class="stat-icon">{{ m.ic('pedidos', 'lg') }}</span><span><span class="n">{{ contagem.pedidos }}</span><span class="l">pedidos</span></span></div>
+  <div class="stat"><span class="stat-icon">{{ m.ic('descarte', 'lg') }}</span><span><span class="n">{{ contagem.descartes }}</span><span class="l">descartes</span></span></div>
+</section>
+
+<div class="grid even">
+<div class="stack">
+  {% if not modo_teste %}
+  <form class="card accent" method="post" enctype="multipart/form-data">{{ m.csrf_field() }}<input type="hidden" name="acao" value="iniciar_teste">
+    <div class="card-head"><h2>{{ m.ic('teste') }} Testar com uma planilha de teste</h2>
+      <p>O app passa a trabalhar numa <b>cópia separada</b> da planilha que você enviar. Você pode registrar saídas, entradas, pedidos e enviar à planilha à vontade: só a planilha de teste muda. A planilha real da nuvem não é tocada.</p></div>
+    <div class="card-body">
+      <ol class="passos">
+        <li>Baixe uma cópia da planilha do SharePoint (ou use uma planilha de exemplo).</li>
+        <li>Envie aqui. Os dados dela são carregados no app.</li>
+        <li>Teste tudo. Use <b>Planilha ▸ Baixar cópia</b> para abrir no Excel e conferir.</li>
+        <li>Quando estiver satisfeito, clique em <b>Encerrar teste</b> para voltar à planilha real.</li>
+      </ol>
+      <div class="field"><label for="arquivo">Planilha de teste (.xlsx)</label><input id="arquivo" type="file" name="arquivo" accept=".xlsx" required></div>
+      <label class="chk"><input type="checkbox" name="apagar" value="1" checked> Apagar os dados atuais do app antes de carregar (recomendado)</label>
+      <p class="hint">Antes de começar, uma cópia de segurança dos dados atuais é guardada automaticamente.</p>
+    </div>
+    <div class="card-foot"><button class="btn">{{ m.ic('teste') }} Começar teste</button></div>
+  </form>
+  {% else %}
+  <form class="card accent" method="post">{{ m.csrf_field() }}<input type="hidden" name="acao" value="encerrar_teste">
+    <div class="card-head"><h2>{{ m.ic('teste') }} Encerrar o teste</h2>
+      <p>Volta a usar a planilha real{% if planilha_real %} (<code>{{ planilha_real }}</code>){% else %}. Nenhuma planilha real está configurada: depois de encerrar, configure em Planilha{% endif %}.</p></div>
+    <div class="card-body">
+      <label class="chk"><input type="checkbox" name="apagar" value="1" checked> Apagar os dados do teste</label>
+      <label class="chk"><input type="checkbox" name="trazer" value="1" checked> Trazer os dados da planilha real logo em seguida</label>
+      <p class="hint">Uma cópia de segurança do teste é guardada antes. A planilha de teste continua salva na pasta <code>teste</code>.</p>
+      <div class="field"><label for="senha_fim">Sua senha</label><input id="senha_fim" name="senha" type="password" required autocomplete="current-password"></div>
+    </div>
+    <div class="card-foot"><button class="btn" data-confirm="Encerrar o teste e voltar para a planilha real?">{{ m.ic('voltar') }} Encerrar teste e usar a planilha real</button></div>
+  </form>
+  {% endif %}
+
+  <form class="card" method="post">{{ m.csrf_field() }}<input type="hidden" name="acao" value="apagar">
+    <div class="card-head"><h2>{{ m.ic('descarte') }} Apagar dados do app</h2>
+      <p>Remove itens, lançamentos, pedidos, descartes, terminais, inventários e pessoas <b>do app</b>. A planilha não é alterada. Sua senha, seu nome e a configuração da planilha continuam.</p></div>
+    <div class="card-body">
+      <div class="alert warn">{{ m.ic('alerta') }}<span>Antes de apagar, uma cópia de segurança é guardada automaticamente. Se precisar, é só restaurar ao lado.</span></div>
+      <div class="row2">
+        <div class="field"><label for="confirmacao">Digite APAGAR</label><input id="confirmacao" name="confirmacao" autocomplete="off" required placeholder="APAGAR"></div>
+        <div class="field"><label for="senha_apagar">Sua senha</label><input id="senha_apagar" name="senha" type="password" required autocomplete="current-password"></div>
+      </div>
+    </div>
+    <div class="card-foot"><button class="btn danger" data-confirm="Apagar todos os dados do app? (uma cópia de segurança será guardada)">{{ m.ic('descarte') }} Apagar dados</button></div>
+  </form>
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>{{ m.ic('banco') }} Cópias de segurança</h2>
+    <form method="post" class="inline-form">{{ m.csrf_field() }}<input type="hidden" name="acao" value="copia"><button class="btn ghost small">{{ m.ic('copiar') }} Fazer cópia agora</button></form>
+    <p>Guardadas em <code>{{ pasta_dados }}{{ '\\' if '\\' in pasta_dados else '/' }}copias-dados</code>. Ficam as 30 mais recentes.</p></div>
+  {% if copias %}
+  <div class="card-body flush"><div class="list">
+    {% for c in copias %}
+    <div class="list-item"><span class="qty in" style="min-width:auto">{{ m.ic('banco') }}</span>
+      <span class="title">{{ c.quando }}</span><span class="meta">{{ c.tamanho }}</span>
+      <span class="sub">{{ c.motivo or 'cópia' }}</span>
+      <div class="acts">
+        <a class="linkbtn" href="{{ url_for('baixar_copia', nome=c.nome) }}">{{ m.ic('baixar') }} Baixar</a>
+        <details class="inline"><summary>Restaurar</summary>
+          <form method="post">{{ m.csrf_field() }}<input type="hidden" name="acao" value="restaurar"><input type="hidden" name="nome" value="{{ c.nome }}">
+            <input name="senha" type="password" required placeholder="Sua senha" autocomplete="current-password" aria-label="Senha para restaurar">
+            <button class="btn ghost small" data-confirm="Voltar os dados do app para {{ c.quando }}? O estado atual também será guardado como cópia.">Confirmar</button></form>
+        </details>
+      </div>
+    </div>
+    {% endfor %}
+  </div></div>
+  {% else %}<div class="card-body">{{ m.vazio('Nenhuma cópia ainda. Elas são criadas sozinhas antes de apagar, restaurar ou testar.', 'banco') }}</div>{% endif %}
+</section>
+</div>
+{% endblock %}

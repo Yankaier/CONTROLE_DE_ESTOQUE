@@ -67,6 +67,20 @@ Em **Mais ▸ Planilha** escolha uma das duas formas:
 - Feche a planilha no Excel antes de enviar.
 - Não apague linhas da Movimentação: para corrigir um lançamento, use **Estornar**.
 
+### Dados e teste (testar antes de usar a planilha real)
+
+Em **Gestão ▸ Dados e teste**:
+
+- **Testar com uma planilha de teste:**
+  - Envie uma cópia da planilha. O app passa a trabalhar numa cópia separada, guardada na pasta `teste`.
+  - Tudo o que você registrar e enviar vai só para essa cópia; a planilha real da nuvem não é tocada.
+  - Uma faixa "Modo teste" aparece em todas as telas enquanto o teste estiver ligado.
+- **Encerrar teste:** apaga os dados do teste (opcional), volta para a planilha real e traz os dados dela.
+- **Apagar dados do app:** pede para digitar APAGAR e a sua senha. Senha, nome e configuração da planilha continuam.
+- **Cópias de segurança do banco:**
+  - São feitas sozinhas antes de apagar, restaurar, começar ou encerrar um teste. Também dá para fazer na hora.
+  - Ficam as 30 últimas, que você pode baixar ou restaurar.
+
 ### O que dá para fazer em cada aba
 
 | Aba | O que faz |

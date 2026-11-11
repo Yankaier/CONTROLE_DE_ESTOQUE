@@ -5,6 +5,7 @@
   <section class="card accent">
     <div class="card-head"><h2>{{ m.ic('planilha') }} Arquivo</h2>{% if caminho and info %}<span class="chip ok">Conectada</span>{% elif caminho %}<span class="chip bad">Não encontrada</span>{% else %}<span class="chip warn">Não configurada</span>{% endif %}</div>
     <div class="card-body">
+      {% if modo_teste %}<div class="alert warn">{{ m.ic('teste') }}<span>Modo teste: o app está usando a <b>planilha de teste</b> abaixo. A planilha real {% if planilha_real %}(<code>{{ planilha_real }}</code>) {% endif %}só volta a ser usada quando você encerrar o teste em <a href="{{ url_for('dados') }}">Dados e teste</a>.</span></div>{% endif %}
       {% if caminho %}
       <div><code>{{ caminho }}</code>{% if info %}<p class="meta" style="margin-top:6px">{{ info.tamanho }} · alterada em {{ info.alterado }}</p>{% endif %}</div>
       <div class="actions">
@@ -30,7 +31,7 @@
     <div class="card-head"><h2>1. Pasta sincronizada <span class="chip info plain">Recomendado</span></h2>
       <p>No SharePoint, abra a biblioteca da planilha e clique em <b>Sincronizar</b>. O OneDrive cria uma pasta no seu computador. Cole aqui o caminho do arquivo nessa pasta: cada envio grava no arquivo e o OneDrive sobe para o SharePoint sozinho.</p></div>
     <div class="card-body">
-      <div class="field"><label for="caminho">Caminho do arquivo .xlsx</label><input id="caminho" name="caminho" value="{{ caminho or '' }}" placeholder="C:\Users\voce\Empresa\Almoxarifado - Documentos\CONTROLE DE ESTOQUES 2.0.xlsx"></div>
+      <div class="field"><label for="caminho">{{ 'Caminho da planilha REAL (usada ao encerrar o teste)' if modo_teste else 'Caminho do arquivo .xlsx' }}</label><input id="caminho" name="caminho" value="{{ (planilha_real if modo_teste else caminho) or '' }}" placeholder="C:\Users\voce\Empresa\Almoxarifado - Documentos\CONTROLE DE ESTOQUES 2.0.xlsx"></div>
       <label class="chk"><input type="checkbox" name="auto" value="1" {{ 'checked' if auto }}> Enviar à planilha automaticamente a cada registro</label>
     </div>
     <div class="card-foot"><button class="btn">{{ m.ic('ok') }} Salvar</button></div>
