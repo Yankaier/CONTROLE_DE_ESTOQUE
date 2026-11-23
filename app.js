@@ -5,7 +5,7 @@
   'use strict';
   const C = window.ALMOX_CONFIG;
   const $ = (id) => document.getElementById(id);
-  const REDIRECT = location.origin + location.pathname;
+  const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
   const SCOPES = 'openid profile offline_access User.Read Files.ReadWrite.All Sites.ReadWrite.All';
   const AUTH = `https://login.microsoftonline.com/${C.tenantId}/oauth2/v2.0`;
   const GRAPH = 'https://graph.microsoft.com/v1.0';
