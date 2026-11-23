@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Almoxarifado</title>
+<style>
+:root { --bg:#f5f6f4; --card:#fff; --fg:#1d2320; --mute:#5e6862; --line:#dde2de; --accent:#1f6f50; --accent-fg:#fff; --ok:#1f6f50; --ok-bg:#e3f1ea; --warn:#8a5a00; --warn-bg:#fbf0d9; --bad:#a32d2d; --bad-bg:#f9e3e3; --in:#2f6fb2; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg:#151917; --card:#1d2320; --fg:#e7ebe8; --mute:#9aa59f; --line:#323b36; --accent:#5cc497; --accent-fg:#0f1512; --ok:#7fd3ad; --ok-bg:#1d3329; --warn:#f0c46b; --warn-bg:#3a2f17; --bad:#f19a9a; --bad-bg:#3d2020; --in:#8cbcf0; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+.wrap { max-width:880px; margin:0 auto; padding-block:16px 48px; padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px)); display:flex; flex-direction:column; gap:14px; }
+header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+h1 { font-size:1.25rem; margin:0; }
+h2 { font-size:1.05rem; margin:0; }
+.chip { font-size:.8rem; padding:4px 10px; border-radius:99px; background:var(--card); border:1px solid var(--line); color:var(--mute); }
+.chip.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent; }
+.chip.warn { background:var(--warn-bg); color:var(--warn); border-color:transparent; }
+.chip.bad { background:var(--bad-bg); color:var(--bad); border-color:transparent; }
+.tabs { display:flex; gap:6px; overflow-x:auto; }
+.tabs button { flex:0 0 auto; }
+button, .btn { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:8px; padding:8px 14px; cursor:pointer; }
+button[aria-selected="true"], button.primary { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; display:flex; flex-direction:column; gap:12px; }
+.row { display:flex; flex-wrap:wrap; gap:10px; }
+.row > .field { flex:1 1 180px; min-width:0; }
+.field { display:flex; flex-direction:column; gap:4px; }
+label { font-size:.82rem; color:var(--mute); }
+input, select, textarea { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; width:100%; }
+textarea { min-height:70px; }
+.seg { display:flex; gap:6px; }
+.seg button { flex:1; }
+.hint { font-size:.82rem; color:var(--mute); }
+.msg { padding:10px 12px; border-radius:8px; font-size:.9rem; }
+.msg.ok { background:var(--ok-bg); color:var(--ok); } .msg.warn { background:var(--warn-bg); color:var(--warn); } .msg.bad { background:var(--bad-bg); color:var(--bad); }
+.list { display:flex; flex-direction:column; gap:6px; max-height:340px; overflow:auto; }
+.it { text-align:left; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.it .d { min-width:0; overflow-wrap:anywhere; }
+.it .s { font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+.sers { display:flex; flex-wrap:wrap; gap:6px; max-height:220px; overflow:auto; }
+.sers label { display:flex; gap:6px; align-items:center; border:1px solid var(--line); border-radius:6px; padding:4px 8px; color:var(--fg); font-size:.85rem; font-family:ui-monospace,Consolas,monospace; }
+.tbl { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; font-size:.85rem; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+td.n { text-align:right; font-variant-numeric:tabular-nums; }
+tr.novo td { background:var(--ok-bg); }
+.ent { color:var(--in); } .sai { color:var(--bad); }
+.center { text-align:center; padding:40px 0; display:flex; flex-direction:column; gap:12px; align-items:center; }
+[hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Almoxarifado · Controle de Estoque</h1>
+    <div class="row" style="align-items:center">
+      <span class="chip" id="chip">Carregando…</span>
+      <span class="hint" id="quem"></span>
+      <button id="sair" hidden>Sair</button>
+    </div>
+  </header>
+
+  <section class="card center" id="telaLogin" hidden>
+    <h2>Entre com sua conta da empresa</h2>
+    <p class="hint">Os dados vêm direto da planilha CONTROLE DE ESTOQUES 2.0 no SharePoint.</p>
+    <button class="primary" id="entrar">Entrar com Microsoft</button>
+  </section>
+
+  <div id="app" hidden>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-aba="mov" aria-selected="true">Entrada / Saída</button>
+      <button role="tab" data-aba="est" aria-selected="false">Estoque</button>
+      <button role="tab" data-aba="ult" aria-selected="false">Últimos lançamentos</button>
+      <button role="tab" data-aba="novo" aria-selected="false">Item novo</button>
+    </nav>
+    <div class="msg" id="msg" hidden></div>
+
+    <section class="card" data-painel="mov">
+      <div class="seg" role="group" aria-label="Tipo">
+        <button id="tEnt" aria-selected="true">Entrada</button>
+        <button id="tSai" aria-selected="false">Saída</button>
+      </div>
+      <div class="field"><label for="busca">Item (nome, SKU, estante ou serial)</label><input id="busca" autocomplete="off" placeholder="Ex.: monitor 21, 118, E13…"></div>
+      <div class="list" id="resultados"></div>
+      <div id="escolhido" hidden class="card" style="padding:12px">
+        <div><b id="eDesc"></b><div class="hint" id="eLocal"></div></div>
+        <div id="boxSeriais" class="field"><label>Seriais disponíveis — marque os que estão saindo</label><div class="sers" id="sers"></div></div>
+        <div class="field" id="boxNovosSer"><label for="novosSer">Seriais que estão entrando (um por linha; deixe vazio se o item não tem serial)</label><textarea id="novosSer"></textarea></div>
+        <div class="row">
+          <div class="field"><label for="qtd">Quantidade</label><input id="qtd" type="number" min="1" value="1" inputmode="numeric"></div>
+          <div class="field"><label for="data">Data</label><input id="data" type="date"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="solic" id="lSolic">Quem trouxe / fornecedor</label><input id="solic" list="pessoas" autocomplete="off"><datalist id="pessoas"></datalist></div>
+          <div class="field" id="boxArea"><label for="area">Para onde vai (setor de destino)</label><input id="area" list="areas" autocomplete="off"><datalist id="areas"></datalist></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="nf">Nota fiscal / documento</label><input id="nf" autocomplete="off"></div>
+          <div class="field"><label for="os">Ordem de serviço</label><input id="os" autocomplete="off"></div>
+        </div>
+        <div class="field"><label for="obs">Observação</label><input id="obs" autocomplete="off"></div>
+        <button class="primary" id="registrar">Registrar na planilha</button>
+      </div>
+    </section>
+
+    <section class="card" data-painel="est" hidden>
+      <div class="field"><label for="buscaEst">Procurar</label><input id="buscaEst" autocomplete="off" placeholder="Nome, SKU, estante ou serial"></div>
+      <div class="tbl"><table><thead><tr><th>Estante</th><th>PT</th><th>Cx</th><th>SKU</th><th>Descrição</th><th class="n">Saldo</th></tr></thead><tbody id="tEst"></tbody></table></div>
+      <p class="hint">O saldo é a soma de todas as linhas da aba Movimentação (saldo inicial + entradas − saídas).</p>
+    </section>
+
+    <section class="card" data-painel="ult" hidden>
+      <p class="hint">As 60 linhas mais recentes da aba Movimentação, de todo mundo (formulário, Excel e esta página). Para corrigir uma linha, use Estornar: entra uma linha contrária e nada é apagado.</p>
+      <div class="tbl"><table><thead><tr><th>Linha</th><th>Data</th><th>Movim.</th><th>Item</th><th>Serial</th><th class="n">Un</th><th>Quem / Área</th><th></th></tr></thead><tbody id="tUlt"></tbody></table></div>
+    </section>
+
+    <section class="card" data-painel="novo" hidden>
+      <p class="hint">Cadastra um item que ainda não existe e lança o saldo inicial. Ele aparece na Contagem com as mesmas fórmulas dos outros itens.</p>
+      <div class="row">
+        <div class="field"><label for="nEst">Estante</label><input id="nEst" inputmode="numeric"></div>
+        <div class="field"><label for="nPt">Prateleira (PT)</label><input id="nPt" placeholder="P3"></div>
+        <div class="field"><label for="nCx">Nº caixa</label><input id="nCx" placeholder="-"></div>
+        <div class="field"><label for="nSku">SKU</label><input id="nSku" inputmode="numeric"></div>
+      </div>
+      <div class="field"><label for="nDesc">Descrição</label><input id="nDesc"></div>
+      <div class="row">
+        <div class="field"><label for="nQtd">Quantidade inicial</label><input id="nQtd" type="number" min="0" value="0"></div>
+        <div class="field"><label for="nSer">Seriais (um por linha, se tiver)</label><textarea id="nSer"></textarea></div>
+      </div>
+      <button class="primary" id="nSalvar">Cadastrar item</button>
+    </section>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
