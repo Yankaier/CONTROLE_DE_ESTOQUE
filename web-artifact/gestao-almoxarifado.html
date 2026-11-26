@@ -1,0 +1,999 @@
+<title>Gestão do Almoxarifado</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: faixa escura de balcão com os indicadores, abas logo abaixo e o conteúdo em cartões sobre cinza de galpão.
+   Cor: amarelo de sinalização como destaque; vermelho = saída, verde = entrada. Tokens em RGB para o Tailwind usar com transparência. */
+:root {
+  --bg: 236 239 241; --surface: 255 255 255; --surface2: 246 248 249;
+  --ink: 27 35 42; --ink2: 57 68 76; --muted: 98 111 120; --line: 221 227 231; --line2: 195 204 210;
+  --accent: 242 183 5; --accent-ink: 122 88 0; --accent-soft: 253 241 208;
+  --good: 46 125 79; --good-soft: 227 242 232; --warn: 154 91 0; --warn-soft: 253 241 216;
+  --bad: 179 38 30; --bad-soft: 251 230 228; --info: 42 93 143; --info-soft: 229 238 247;
+  --band: 27 35 42; --band-ink: 230 235 238; --band-muted: 160 173 182; --band-line: 52 63 71;
+  --btn-out: 179 38 30; --btn-in: 46 125 79;
+  --f-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --f-body: "Barlow", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 17 22 26; --surface: 26 33 38; --surface2: 31 39 45;
+    --ink: 230 235 238; --ink2: 196 205 211; --muted: 147 161 171; --line: 43 53 60; --line2: 60 72 80;
+    --accent-ink: 245 200 66; --accent-soft: 58 47 16;
+    --good: 91 196 138; --good-soft: 23 48 31; --warn: 224 160 64; --warn-soft: 51 40 15;
+    --bad: 240 122 114; --bad-soft: 58 28 26; --info: 127 177 227; --info-soft: 24 39 54;
+    --band: 12 16 19; --band-line: 38 47 54;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: 17 22 26; --surface: 26 33 38; --surface2: 31 39 45;
+  --ink: 230 235 238; --ink2: 196 205 211; --muted: 147 161 171; --line: 43 53 60; --line2: 60 72 80;
+  --accent-ink: 245 200 66; --accent-soft: 58 47 16;
+  --good: 91 196 138; --good-soft: 23 48 31; --warn: 224 160 64; --warn-soft: 51 40 15;
+  --bad: 240 122 114; --bad-soft: 58 28 26; --info: 127 177 227; --info-soft: 24 39 54;
+  --band: 12 16 19; --band-line: 38 47 54;
+  color-scheme: dark;
+}
+button { font-family: inherit; }
+body { background: rgb(var(--bg)); color: rgb(var(--ink)); font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.font-display { font-family: var(--f-display); }
+.font-mono, .num { font-family: var(--f-mono); }
+.num { font-variant-numeric: tabular-nums; }
+h1, h2, h3 { text-wrap: balance; }
+.stripe { background: repeating-linear-gradient(-45deg, rgb(var(--accent)) 0 8px, rgb(27 35 42) 8px 16px); }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.lbl { font-size: .72rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--muted)); }
+.inp { width: 100%; min-width: 0; font: inherit; color: rgb(var(--ink)); background: rgb(var(--surface)); border: 1px solid rgb(var(--line2)); border-radius: 8px; padding: 8px 11px; }
+.inp:focus { outline: none; border-color: rgb(var(--accent)); box-shadow: 0 0 0 3px rgb(var(--accent) / .3); }
+.inp[aria-invalid="true"] { border-color: rgb(var(--bad)); }
+textarea.inp { min-height: 64px; resize: vertical; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-family: var(--f-display); font-weight: 700; font-size: .98rem; letter-spacing: .05em; text-transform: uppercase; padding: 8px 15px; border-radius: 8px; border: 2px solid rgb(var(--ink)); background: rgb(var(--accent)); color: rgb(27 35 42); cursor: pointer; white-space: nowrap; transition: transform .06s, box-shadow .12s; }
+.btn:hover:not(:disabled) { box-shadow: 0 2px 0 rgb(var(--ink)); transform: translateY(-1px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-ghost { background: rgb(var(--surface)); color: rgb(var(--ink)); border: 1px solid rgb(var(--line2)); font-size: .85rem; padding: 6px 11px; }
+.btn-ghost:hover:not(:disabled) { border-color: rgb(var(--ink)); box-shadow: none; }
+.btn-out { background: rgb(var(--btn-out)); border-color: rgb(var(--btn-out)); color: #fff; }
+.btn-in { background: rgb(var(--btn-in)); border-color: rgb(var(--btn-in)); color: #fff; }
+.btn-sm { font-size: .78rem; padding: 4px 9px; }
+.card { background: rgb(var(--surface)); border: 1px solid rgb(var(--line)); border-radius: 12px; min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.chip-ok { background: rgb(var(--good-soft)); color: rgb(var(--good)); }
+.chip-warn { background: rgb(var(--warn-soft)); color: rgb(var(--warn)); }
+.chip-bad { background: rgb(var(--bad-soft)); color: rgb(var(--bad)); }
+.chip-info { background: rgb(var(--info-soft)); color: rgb(var(--info)); }
+.chip-plain { background: rgb(var(--surface2)); color: rgb(var(--muted)); border: 1px solid rgb(var(--line)); }
+table.grid-t { width: 100%; border-collapse: collapse; font-size: .88rem; }
+table.grid-t th { text-align: left; font-size: .7rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: rgb(var(--muted)); background: rgb(var(--surface2)); border-bottom: 1px solid rgb(var(--line)); padding: 8px 12px; white-space: nowrap; }
+table.grid-t td { border-bottom: 1px solid rgb(var(--line)); padding: 9px 12px; vertical-align: top; }
+table.grid-t tbody tr:hover td { background: rgb(var(--accent-soft) / .45); }
+table.grid-t .r { text-align: right; }
+.scroll-x { overflow-x: auto; }
+.tabs { scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { display: inline-flex; align-items: center; gap: 7px; padding: 11px 14px; font-family: var(--f-display); font-weight: 700; font-size: 1rem; letter-spacing: .05em; text-transform: uppercase; color: rgb(var(--muted)); border-bottom: 3px solid transparent; white-space: nowrap; text-decoration: none; }
+.tab:hover { color: rgb(var(--ink)); }
+.tab[aria-current="page"] { color: rgb(var(--ink)); border-bottom-color: rgb(var(--accent)); }
+.badge { font-family: var(--f-mono); font-size: .7rem; background: rgb(var(--accent)); color: rgb(27 35 42); border-radius: 999px; padding: 0 7px; }
+.navbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: rgb(var(--bg) / .94); backdrop-filter: blur(6px); border-bottom: 1px solid rgb(var(--line)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: rgb(var(--bg)); }
+.modal-back { position: fixed; inset: 0; z-index: 50; background: rgb(var(--band) / .55); display: grid; place-items: start center; overflow-y: auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 24px) max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); }
+.toasts { position: fixed; z-index: 60; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 8px; max-width: min(420px, calc(100vw - 32px)); }
+pre.code { font-family: var(--f-mono); font-size: .78rem; line-height: 1.55; background: rgb(var(--surface2)); border: 1px solid rgb(var(--line)); border-radius: 8px; padding: 12px; overflow-x: auto; white-space: pre; }
+:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+  tailwind.config = {
+    corePlugins: { preflight: false },
+    theme: { extend: {
+      colors: Object.fromEntries(["bg","surface","surface2","ink","ink2","muted","line","line2","accent","accent-ink","accent-soft","good","good-soft","warn","warn-soft","bad","bad-soft","info","info-soft","band","band-ink","band-muted","band-line"]
+        .map((k) => [k, `rgb(var(--${k}) / <alpha-value>)`])),
+    } },
+  };
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+<script>window.react = window.React; /* o pacote UMD do lucide-react procura o React com "r" minúsculo */</script>
+<script src="https://unpkg.com/lucide-react@0.469.0/dist/umd/lucide-react.min.js"></script>
+
+<div id="app"><p class="gutter" style="padding-block: 40px; color: rgb(var(--muted))">Carregando o almoxarifado…</p></div>
+
+<script>
+"use strict";
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+const html = htm.bind(React.createElement);
+const L = window.LucideReact || {};
+function Ic({ n, size = 18, className = "" }) {
+  const C = L[n];
+  return C ? html`<${C} size=${size} strokeWidth=${2} className=${className} aria-hidden="true" />` : null;
+}
+
+/* ================= utilidades ================= */
+const CHAVE = "almoxarifado.gestao.v1";
+const UNIDADES = ["un", "pct", "cx", "kg", "m", "L", "rolo", "par", "jg"];
+const NIVEIS = ["Solicitante", "Supervisor", "Gestor"];
+const DESTINOS_BASE = ["Montagem", "Manutenção", "OPERADOR", "Fornecedor", "Descarte"];
+const brl = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const qtdFmt = (n) => (Number(n) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
+const dataHora = (iso) => { const d = new Date(iso); return isNaN(d) ? String(iso || "") : d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
+const agora = () => new Date().toISOString();
+const uid = (p) => p + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+const num = (v) => { const s = String(v ?? "").trim().replace(/\s/g, ""); if (!s) return NaN; return Number(/,\d{1,3}$/.test(s) ? s.replace(/\./g, "").replace(",", ".") : s.replace(",", ".")); };
+const statusItem = (it) => (it.qtd <= 0 ? "Esgotado" : it.minimo > 0 && it.qtd <= it.minimo ? "Baixo" : "Normal");
+const CHIP_STATUS = { Normal: "chip-ok", Baixo: "chip-warn", Esgotado: "chip-bad" };
+const isoLocal = (d) => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return z.toISOString().slice(0, 16); };
+
+/* ================= dados de exemplo (da nossa conversa) ================= */
+function exemplos() {
+  const t = (diasAtras, h = 9, m = 0) => { const d = new Date(); d.setDate(d.getDate() - diasAtras); d.setHours(h, m, 0, 0); return d.toISOString(); };
+  const it = (id, sku, nome, categoria, unidade, valor, minimo, local) => ({ id, sku, nome, categoria, unidade, valor, minimo, local, qtd: 0, criadoEm: t(30) });
+  const itens = [
+    it("i1", "CB-06", "CABO DE REDE CAT6", "Rede e cabos", "un", 18.9, 5, "Estante 3 · PT2 · Caixa 12"),
+    it("i2", "LT-01", "LEITOR DE CARTÃO", "Periféricos", "un", 320, 1, "Estante 1 · PT1"),
+    it("i3", "FN-9", "FONTE 12V", "Elétrica", "un", 45, 5, "Estante 5 · PT3"),
+    it("i4", "P001", "CANETA AZUL", "Papelaria", "un", 2.5, 10, "Estante 7 · PT1"),
+    it("i5", "P002", "CADERNO 96 FOLHAS", "Papelaria", "un", 15, 5, "Estante 7 · PT1"),
+    it("i6", "IMP-58", "IMPRESSORA TÉRMICA 58MM", "Periféricos", "un", 410, 2, "Estante 2 · PT1"),
+    it("i7", "NOT-01", "NOTEIRO (VALIDADOR DE CÉDULAS)", "Periféricos", "un", 890, 1, "Estante 2 · PT2"),
+    it("i8", "LAC-100", "LACRE NUMERADO (PACOTE 100)", "Consumo", "pct", 38, 4, "Estante 6 · PT1"),
+    it("i9", "BOB-57", "BOBINA TÉRMICA 57X40", "Consumo", "cx", 96, 3, "Estante 6 · PT2"),
+    it("i10", "CH-T", "CHAVE TUBULAR", "Ferragens", "un", 12.5, 10, "Estante 4 · PT3"),
+  ];
+  const operadores = [
+    { id: "o1", matricula: "OP-001", nome: "LUAN", setor: "Montagem", cargo: "Montador", status: "Ativo", nivel: "Solicitante" },
+    { id: "o2", matricula: "OP-002", nome: "ANA", setor: "Montagem", cargo: "Líder de montagem", status: "Ativo", nivel: "Supervisor" },
+    { id: "o3", matricula: "OP-003", nome: "MARIA", setor: "Manutenção", cargo: "Técnica", status: "Ativo", nivel: "Solicitante" },
+    { id: "o4", matricula: "OP-004", nome: "JOÃO", setor: "Almoxarifado", cargo: "Almoxarife", status: "Ativo", nivel: "Gestor" },
+    { id: "o5", matricula: "OP-090", nome: "OPERADOR TEMPORÁRIO", setor: "OPERADOR", cargo: "Contrato encerrado", status: "Inativo", nivel: "Solicitante" },
+  ];
+  const db = { versao: 1, exemplo: true, itens, operadores, movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false } };
+  const op = (id) => operadores.find((o) => o.id === id);
+  const mov = (tipo, itemId, qtd, extra) => aplicarMov(db, { tipo, itemId, qtd, origem: "Manual", ...extra }, true);
+  mov("Entrada", "i1", 10, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
+  mov("Saída", "i1", 6, { dataHora: t(12, 10, 15), destino: "Montagem", operador: op("o1"), os: "0042/26" });
+  mov("Entrada", "i2", 3, { dataHora: t(18), nf: "123", obs: "Fornecedor X" });
+  mov("Saída", "i2", 1, { dataHora: t(3, 14, 5), destino: "Montagem", operador: op("o1"), obs: "Serial 818EZ001" });
+  mov("Entrada", "i3", 20, { dataHora: t(15), nf: "4471" });
+  mov("Entrada", "i4", 50, { dataHora: t(25), obs: "Compra fornecedor" });
+  mov("Saída", "i4", 45, { dataHora: t(9, 11, 30), destino: "Sala 3", operador: op("o2") });
+  mov("Entrada", "i5", 4, { dataHora: t(25) });
+  mov("Saída", "i5", 4, { dataHora: t(2, 8, 40), destino: "Manutenção", operador: op("o3") });
+  mov("Entrada", "i6", 3, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
+  mov("Entrada", "i7", 1, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
+  mov("Entrada", "i8", 12, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
+  mov("Entrada", "i9", 6, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
+  mov("Entrada", "i10", 25, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
+  mov("Saída", "i10", 3, { dataHora: t(1, 16, 20), destino: "Manutenção", operador: op("o4"), obs: "Troca de fechaduras" });
+  const amanha = new Date(); amanha.setDate(amanha.getDate() + 1); amanha.setHours(8, 0, 0, 0);
+  const req = (matricula, item, qtd, destino, obs) => ({ matricula, item, qtd, destino, obs, previsto: isoLocal(amanha), fonte: "Formulário (exemplo)" });
+  [req("OP-002", "IMP-58", 2, "Montagem", "Terminais da linha 2"), req("OP-003", "FONTE 12V", 3, "Manutenção", ""), req("OP-099", "CB-06", 2, "Obra Centro", "Matrícula não cadastrada")]
+    .forEach((r) => novaRequisicao(db, r));
+  return db;
+}
+
+/* ================= regras de negócio ================= */
+function aplicarMov(db, d, semValidar) {
+  const it = db.itens.find((x) => x.id === d.itemId);
+  if (!it) throw new Error("Item não encontrado.");
+  const q = Number(d.qtd);
+  if (!(q > 0) && d.tipo !== "Ajuste") throw new Error("A quantidade precisa ser maior que zero.");
+  if (d.tipo === "Saída") {
+    if (!semValidar && q > it.qtd) throw new Error(`Saldo insuficiente: há ${qtdFmt(it.qtd)} ${it.unidade} de ${it.nome}.`);
+    if (!String(d.destino || "").trim()) throw new Error("Informe o destino do material.");
+    if (!d.operador) throw new Error("Escolha o operador responsável.");
+    if (d.operador.status !== "Ativo") throw new Error(`${d.operador.nome} está inativo e não pode retirar material.`);
+  }
+  if (d.tipo === "Entrada" && d.novoValor != null && !isNaN(d.novoValor) && d.novoValor >= 0) {
+    it.valor = d.modoValor === "substituir" ? d.novoValor
+      : (it.qtd > 0 ? (it.qtd * it.valor + q * d.novoValor) / (it.qtd + q) : d.novoValor);
+    it.valor = Math.round(it.valor * 10000) / 10000;
+  }
+  const delta = d.tipo === "Saída" ? -q : q;
+  it.qtd = Math.round((it.qtd + delta) * 1000) / 1000;
+  db.seq.mov += 1;
+  const m = {
+    id: uid("m"), n: db.seq.mov, tipo: d.tipo, itemId: it.id, sku: it.sku, nome: it.nome, unidade: it.unidade,
+    qtd: d.tipo === "Ajuste" ? q : Math.abs(q), valorUnit: it.valor, valorTotal: Math.abs(q) * it.valor,
+    destino: d.tipo === "Saída" ? String(d.destino).trim() : (d.destino || ""),
+    operadorId: d.operador?.id || "", operadorNome: d.operador?.nome || "", operadorMatricula: d.operador?.matricula || "",
+    nf: d.nf || "", os: d.os || "", obs: d.obs || "", origem: d.origem || "Manual", dataHora: d.dataHora || agora(), saldoApos: it.qtd,
+  };
+  db.movs.push(m);
+  return m;
+}
+
+function novaRequisicao(db, r) {
+  db.seq.req += 1;
+  const q = { id: uid("r"), num: "R-" + String(db.seq.req).padStart(4, "0"), recebidaEm: r.recebidaEm || agora(), matricula: String(r.matricula || "").trim(),
+    item: String(r.item || "").trim(), itemId: "", qtd: num(r.qtd), previsto: r.previsto || "", destino: String(r.destino || "").trim(), obs: String(r.obs || "").trim(),
+    fonte: r.fonte || "Formulário", chave: r.chave || "", status: "Pendente", motivo: "", movId: "", decididoEm: "" };
+  db.requisicoes.push(q);
+  return q;
+}
+
+function acharItem(db, texto) {
+  const t = norm(texto);
+  if (!t) return null;
+  return db.itens.find((i) => norm(i.sku) === t) || db.itens.find((i) => norm(i.nome) === t)
+    || (() => { const p = db.itens.filter((i) => norm(i.nome).includes(t) || t.includes(norm(i.sku))); return p.length === 1 ? p[0] : null; })();
+}
+function acharOperador(db, texto) {
+  const t = norm(texto);
+  return t ? db.operadores.find((o) => norm(o.matricula) === t) || db.operadores.find((o) => norm(o.nome) === t) || null : null;
+}
+function checarRequisicao(db, r) {
+  const op = acharOperador(db, r.matricula);
+  const it = r.itemId ? db.itens.find((i) => i.id === r.itemId) : acharItem(db, r.item);
+  const checks = [
+    { ok: !!op && op.status === "Ativo", txt: !op ? `Operador "${r.matricula || "?"}" não está cadastrado` : op.status !== "Ativo" ? `${op.nome} está inativo` : `Operador autorizado: ${op.nome} (${op.matricula}, ${op.nivel})` },
+    { ok: !!it, txt: it ? `Item: ${it.nome} (${it.sku})` : `Item "${r.item || "?"}" não encontrado no cadastro`, semItem: !it },
+    { ok: r.qtd > 0, txt: r.qtd > 0 ? `Quantidade: ${qtdFmt(r.qtd)}${it ? " " + it.unidade : ""}` : "Quantidade inválida" },
+    { ok: !!it && r.qtd > 0 && r.qtd <= it.qtd, txt: !it ? "Disponibilidade: escolha o item primeiro" : r.qtd <= it.qtd ? `Disponível: ${qtdFmt(it.qtd)} ${it.unidade} (fica ${qtdFmt(it.qtd - r.qtd)})` : `Saldo insuficiente: só há ${qtdFmt(it.qtd)} ${it.unidade}` },
+    { ok: !!r.destino, txt: r.destino ? `Destino: ${r.destino}` : "Destino não informado" },
+  ];
+  return { op, it, checks, ok: checks.every((c) => c.ok) };
+}
+
+/* ================= persistência (localStorage, como pedido) ================= */
+function carregar() {
+  try {
+    const raw = localStorage.getItem(CHAVE);
+    if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.itens) && Array.isArray(d.movs)) return { db: completar(d), armazenamento: true }; }
+  } catch (_) { return { db: exemplos(), armazenamento: false }; }
+  return { db: exemplos(), armazenamento: true };
+}
+function completar(d) {
+  return { versao: 1, exemplo: !!d.exemplo, itens: d.itens || [], operadores: d.operadores || [], movs: d.movs || [], requisicoes: d.requisicoes || [],
+    seq: { mov: d.seq?.mov || (d.movs || []).length, req: d.seq?.req || (d.requisicoes || []).length },
+    integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false, ...(d.integracao || {}) } };
+}
+function salvar(db) { try { localStorage.setItem(CHAVE, JSON.stringify(db)); return true; } catch (_) { return false; } }
+
+/* ================= CSV ================= */
+function csvLinhas(texto) {
+  const t = String(texto).replace(/^﻿/, "");
+  const primeira = t.split(/\r?\n/)[0] || "";
+  const sep = (primeira.match(/;/g) || []).length > (primeira.match(/,/g) || []).length ? ";" : (primeira.includes("\t") ? "\t" : ",");
+  const out = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === sep) { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && t[i + 1] === "\n") i++; row.push(cell); out.push(row); row = []; cell = ""; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); out.push(row); }
+  return out.filter((r) => r.some((c) => String(c).trim()));
+}
+function paraCsv(linhas) {
+  const q = (v) => { const s = String(v ?? ""); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  return "﻿" + linhas.map((r) => r.map(q).join(";")).join("\r\n");
+}
+/* Cabeçalhos do formulário -> campos da requisição (Google Forms, Tally, Typeform, Jotform) */
+function mapearCabecalho(cab) {
+  const idx = {};
+  cab.forEach((h, i) => {
+    const n = norm(h);
+    if (idx.recebida == null && /(carimbo|timestamp|submitted|enviado em|data de envio|submission)/.test(n)) idx.recebida = i;
+    else if (idx.matricula == null && /(matricula|id do operador|operador|codigo do operador)/.test(n)) idx.matricula = i;
+    else if (idx.item == null && /(item|sku|material|produto)/.test(n)) idx.item = i;
+    else if (idx.qtd == null && /(quant|qtd)/.test(n)) idx.qtd = i;
+    else if (idx.previsto == null && /(previst|retirada|data e hora|horario)/.test(n)) idx.previsto = i;
+    else if (idx.destino == null && /(destino|setor|obra|centro de custo|cliente|departamento)/.test(n)) idx.destino = i;
+    else if (idx.obs == null && /(obs|coment|justific)/.test(n)) idx.obs = i;
+  });
+  return idx;
+}
+function linhasParaRequisicoes(linhas, fonte) {
+  if (!linhas || linhas.length < 2) return { regs: [], faltando: ["cabeçalho e pelo menos uma resposta"] };
+  const idx = mapearCabecalho(linhas[0]);
+  const faltando = ["matricula", "item", "qtd", "destino"].filter((k) => idx[k] == null);
+  if (faltando.length) return { regs: [], faltando };
+  const regs = linhas.slice(1).map((r) => {
+    const v = (k) => (idx[k] != null ? String(r[idx[k]] ?? "").trim() : "");
+    const chave = [fonte, v("recebida"), v("matricula"), v("item"), v("qtd"), v("destino"), v("previsto")].join("|");
+    return { matricula: v("matricula"), item: v("item"), qtd: v("qtd"), destino: v("destino"), previsto: v("previsto"), obs: v("obs"), recebidaEm: v("recebida") || agora(), fonte, chave };
+  }).filter((r) => r.matricula || r.item);
+  return { regs, faltando: [] };
+}
+function valoresDaResposta(p) {
+  if (p == null) return null;
+  if (typeof p === "string") { try { return valoresDaResposta(JSON.parse(p)); } catch (_) { return null; } }
+  if (Array.isArray(p)) return p.every(Array.isArray) ? p : null;
+  if (Array.isArray(p.values)) return p.values;
+  for (const v of Object.values(p)) if (v && typeof v === "object") { const r = valoresDaResposta(v); if (r) return r; }
+  return null;
+}
+const idDaPlanilha = (s) => { const m = String(s || "").match(/\/d\/([a-zA-Z0-9_-]{20,})/); return m ? m[1] : String(s || "").trim(); };
+
+/* ================= capacidades da página ================= */
+const usar = (n) => (window.claude && window.claude.use ? window.claude.use(n).catch(() => null) : Promise.resolve(null));
+
+/* ================= componentes de interface ================= */
+function Modal({ titulo, onClose, children, largo }) {
+  useEffect(() => { const f = (e) => e.key === "Escape" && onClose(); window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f); }, [onClose]);
+  return html`<div class="modal-back" onMouseDown=${(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label=${titulo}>
+    <div class=${"card w-full shadow-2xl " + (largo ? "max-w-4xl" : "max-w-xl")} style=${{ borderWidth: 2, borderColor: "rgb(var(--ink))" }}>
+      <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-line">
+        <h2 class="font-display text-xl font-bold uppercase tracking-wide m-0">${titulo}</h2>
+        <button class="btn btn-ghost btn-sm" onClick=${onClose} aria-label="Fechar"><${Ic} n="X" size=${16} /></button>
+      </div>
+      <div class="p-5 flex flex-col gap-4">${children}</div>
+    </div></div>`;
+}
+function Campo({ id, rotulo, dica, erro, children }) {
+  return html`<div class="field"><label class="lbl" for=${id}>${rotulo}</label>${children}
+    ${erro ? html`<span class="text-xs font-semibold text-bad">${erro}</span>` : dica ? html`<span class="text-xs text-muted">${dica}</span>` : null}</div>`;
+}
+function Vazio({ icone = "Inbox", texto, children }) {
+  return html`<div class="flex flex-col items-center gap-2 py-10 px-4 text-center text-muted"><${Ic} n=${icone} size=${28} /><p class="m-0 max-w-md">${texto}</p>${children}</div>`;
+}
+function Kpi({ icone, valor, rotulo, tom, onClick, sub }) {
+  const cores = { ok: "bg-good-soft text-good", warn: "bg-warn-soft text-warn", bad: "bg-bad-soft text-bad", info: "bg-info-soft text-info", accent: "bg-accent text-[#1b232a]" };
+  return html`<button onClick=${onClick} class="text-left flex items-center gap-3 p-3 sm:p-4 rounded-xl border border-band-line bg-[rgb(var(--band-line)/.35)] hover:border-accent transition-colors min-w-0" style=${{ color: "rgb(var(--band-ink))" }}>
+    <span class=${"hidden min-[420px]:grid sm:grid place-items-center w-11 h-11 rounded-lg shrink-0 " + cores[tom]}><${Ic} n=${icone} size=${22} /></span>
+    <span class="min-w-0"><span class="num block font-semibold leading-tight truncate" style=${{ fontSize: "clamp(1rem, 3.6vw, 1.45rem)" }}>${valor}</span>
+    <span class="block text-[.72rem] uppercase tracking-wider" style=${{ color: "rgb(var(--band-muted))" }}>${rotulo}${sub ? html` · ${sub}` : null}</span></span></button>`;
+}
+
+/* ================= app ================= */
+function App() {
+  const ini = useMemo(carregar, []);
+  const [db, setDb] = useState(ini.db);
+  const dbRef = useRef(ini.db);
+  const [armazenamento, setArmazenamento] = useState(ini.armazenamento);
+  const [aba, setAba] = useState(() => (["estoque", "movimentar", "historico", "requisicoes", "operadores", "integracao"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "estoque"));
+  const [toasts, setToasts] = useState([]);
+  const [confirmar, setConfirmar] = useState(null);
+  const [downloads, setDownloads] = useState(null);
+  const [mcp, setMcp] = useState(undefined);
+  const [textoSaida, setTextoSaida] = useState(null);
+  const [preMov, setPreMov] = useState(null);
+
+  useEffect(() => { const ok = salvar(db); setArmazenamento(ok); }, [db]);
+  useEffect(() => { const f = () => { const h = location.hash.slice(1); if (h) setAba(h); }; window.addEventListener("hashchange", f); return () => window.removeEventListener("hashchange", f); }, []);
+  useEffect(() => { usar("downloads").then(setDownloads); usar("mcp").then((m) => setMcp(m || null)); }, []);
+
+  const irPara = (a) => { setAba(a); try { history.replaceState(null, "", "#" + a); } catch (_) { location.hash = a; } window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const avisar = useCallback((texto, tom = "ok") => { const id = uid("t"); setToasts((t) => [...t, { id, texto, tom }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4800); }, []);
+  const substituir = useCallback((novo) => { dbRef.current = novo; setDb(novo); }, []);
+  /* toda mudança passa por aqui: copia o estado atual, aplica e só grava se não deu erro */
+  const mudar = useCallback((fn, msg) => {
+    const c = JSON.parse(JSON.stringify(dbRef.current));
+    let ret;
+    try { ret = fn(c); } catch (e) { avisar(e.message, "bad"); return false; }
+    substituir(c);
+    if (msg) avisar(typeof msg === "function" ? msg(ret) : msg);
+    return true;
+  }, [avisar, substituir]);
+
+  const baixar = async (nome, conteudo) => {
+    if (downloads) {
+      try { await downloads.save({ filename: nome, data: conteudo }); avisar(`${nome} salvo.`); return; }
+      catch (e) { if (e && e.code === "declined") { avisar("Download cancelado.", "warn"); return; } }
+    }
+    setTextoSaida({ nome, conteudo: String(conteudo).replace(/^﻿/, "") });
+  };
+
+  const kpi = useMemo(() => {
+    const valor = db.itens.reduce((s, i) => s + i.qtd * i.valor, 0);
+    const baixo = db.itens.filter((i) => statusItem(i) === "Baixo").length;
+    const esg = db.itens.filter((i) => statusItem(i) === "Esgotado").length;
+    const pend = db.requisicoes.filter((r) => r.status === "Pendente").length;
+    return { valor, baixo, esg, pend, unidades: db.itens.reduce((s, i) => s + i.qtd, 0) };
+  }, [db]);
+
+  const destinos = useMemo(() => [...new Set([...DESTINOS_BASE, ...db.movs.map((m) => m.destino).filter(Boolean), ...db.requisicoes.map((r) => r.destino).filter(Boolean)])], [db]);
+  const ABAS = [["estoque", "Estoque", "Boxes"], ["movimentar", "Movimentar", "ArrowUpDown"], ["historico", "Histórico", "History"],
+    ["requisicoes", "Requisições", "ClipboardList", kpi.pend], ["operadores", "Operadores", "UserCheck"], ["integracao", "Integração e backup", "PlugZap"]];
+  const ctx = { db, mudar, avisar, irPara, setConfirmar, baixar, destinos, mcp, downloads, setPreMov, preMov };
+
+  return html`
+  <header class="gutter relative overflow-hidden" style=${{ background: "rgb(var(--band))", color: "rgb(var(--band-ink))", marginTop: "calc(-1 * env(safe-area-inset-top, 0px))", paddingTop: "calc(env(safe-area-inset-top, 0px) + 22px)", paddingBottom: "22px" }}>
+    <div class="absolute right-0 top-0 bottom-0 w-3 stripe" aria-hidden="true"></div>
+    <div class="max-w-7xl mx-auto flex flex-col gap-4 pr-4">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <span class="grid place-items-center w-11 h-11 rounded-lg stripe shrink-0"><span class="grid place-items-center w-8 h-8 rounded-md bg-accent text-[#1b232a]"><${Ic} n="Package" size=${20} /></span></span>
+          <div><h1 class="font-display text-3xl font-bold leading-none m-0">Gestão do Almoxarifado</h1>
+          <p class="m-0 mt-1 text-sm" style=${{ color: "rgb(var(--band-muted))" }}>Estoque, entradas e saídas com destino e operador, e requisições vindas do formulário.</p></div>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          ${db.exemplo ? html`<span class="chip chip-warn" title="Itens, operadores e movimentos de exemplo, tirados da nossa conversa">Dados de exemplo</span>` : null}
+          <span class=${"chip " + (armazenamento ? "chip-ok" : "chip-bad")} title=${armazenamento ? "Tudo fica salvo neste navegador" : "Este navegador não está guardando os dados: exporte um backup"}>
+            <${Ic} n=${armazenamento ? "Database" : "TriangleAlert"} size=${12} /> ${armazenamento ? "Salvo neste navegador" : "Sem salvamento"}</span>
+        </div>
+      </div>
+      <div class="grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))" }}>
+        <${Kpi} icone="Banknote" valor=${brl(kpi.valor)} rotulo="Valor total em estoque" tom="accent" onClick=${() => irPara("estoque")} />
+        <${Kpi} icone="Boxes" valor=${db.itens.length} rotulo="Itens cadastrados" sub=${qtdFmt(kpi.unidades) + " unidades"} tom="info" onClick=${() => irPara("estoque")} />
+        <${Kpi} icone="TriangleAlert" valor=${kpi.baixo + kpi.esg} rotulo="Alertas de estoque" sub=${`${kpi.baixo} baixo · ${kpi.esg} esgotado`} tom=${kpi.baixo + kpi.esg ? "warn" : "ok"} onClick=${() => irPara("estoque")} />
+        <${Kpi} icone="ClipboardList" valor=${kpi.pend} rotulo="Requisições pendentes" tom=${kpi.pend ? "bad" : "ok"} onClick=${() => irPara("requisicoes")} />
+      </div>
+    </div>
+  </header>
+  <nav class="navbar gutter" aria-label="Áreas">
+    <div class="max-w-7xl mx-auto flex overflow-x-auto tabs">
+      ${ABAS.map(([k, n, ic, b]) => html`<a key=${k} href=${"#" + k} class="tab" aria-current=${aba === k ? "page" : undefined} onClick=${(e) => { e.preventDefault(); irPara(k); }}>
+        <${Ic} n=${ic} size=${17} />${n}${b ? html`<span class="badge">${b}</span>` : null}</a>`)}
+    </div>
+  </nav>
+  <main class="gutter" style=${{ paddingBlock: "24px 56px" }}>
+    <div class="max-w-7xl mx-auto flex flex-col gap-5">
+      ${aba === "estoque" ? html`<${Estoque} ...${ctx} />` : null}
+      ${aba === "movimentar" ? html`<${Movimentar} ...${ctx} />` : null}
+      ${aba === "historico" ? html`<${Historico} ...${ctx} />` : null}
+      ${aba === "requisicoes" ? html`<${Requisicoes} ...${ctx} />` : null}
+      ${aba === "operadores" ? html`<${Operadores} ...${ctx} />` : null}
+      ${aba === "integracao" ? html`<${Integracao} ...${ctx} setDb=${substituir} />` : null}
+    </div>
+  </main>
+  ${confirmar ? html`<${Modal} titulo=${confirmar.titulo} onClose=${() => setConfirmar(null)}>
+      <p class="m-0">${confirmar.texto}</p>
+      <div class="flex flex-wrap justify-end gap-2"><button class="btn btn-ghost" onClick=${() => setConfirmar(null)}>Cancelar</button>
+      <button class=${"btn " + (confirmar.perigo ? "btn-out" : "")} onClick=${() => { const a = confirmar.acao; setConfirmar(null); a(); }}>${confirmar.botao || "Confirmar"}</button></div>
+    <//>` : null}
+  ${textoSaida ? html`<${Modal} titulo=${"Copiar " + textoSaida.nome} onClose=${() => setTextoSaida(null)} largo=${true}>
+      <p class="m-0 text-sm text-muted">Esta visualização não permite baixar arquivos. Copie o conteúdo abaixo e cole num arquivo com o nome <b class="font-mono">${textoSaida.nome}</b>.</p>
+      <textarea class="inp font-mono text-xs" style=${{ minHeight: 280 }} readonly id="saida-texto" value=${textoSaida.conteudo}></textarea>
+      <div class="flex justify-end"><button class="btn" onClick=${() => { const el = document.getElementById("saida-texto"); navigator.clipboard?.writeText(textoSaida.conteudo).then(() => avisar("Copiado.")).catch(() => { el.select(); avisar("Texto selecionado: use Ctrl+C.", "warn"); }); }}><${Ic} n="Copy" size=${16} /> Copiar</button></div>
+    <//>` : null}
+  <div class="toasts" aria-live="polite">${toasts.map((t) => html`<div key=${t.id} class=${"card shadow-xl px-4 py-3 flex gap-2 items-start text-sm font-medium " + (t.tom === "bad" ? "text-bad" : t.tom === "warn" ? "text-warn" : "text-good")} style=${{ borderLeft: "4px solid currentColor" }}>
+    <${Ic} n=${t.tom === "bad" ? "CircleX" : t.tom === "warn" ? "TriangleAlert" : "CircleCheck"} size=${18} /><span class="text-ink">${t.texto}</span></div>`)}</div>`;
+}
+
+/* ================= aba: Estoque ================= */
+function Estoque({ db, mudar, setConfirmar, irPara, setPreMov }) {
+  const [busca, setBusca] = useState("");
+  const [cat, setCat] = useState("");
+  const [st, setSt] = useState("");
+  const [ordem, setOrdem] = useState("nome");
+  const [editar, setEditar] = useState(null);
+  const cats = useMemo(() => [...new Set(db.itens.map((i) => i.categoria).filter(Boolean))].sort(), [db.itens]);
+  const lista = useMemo(() => {
+    const t = norm(busca);
+    let l = db.itens.filter((i) => (!t || norm(i.nome).includes(t) || norm(i.sku).includes(t) || norm(i.local).includes(t)) && (!cat || i.categoria === cat) && (!st || statusItem(i) === st));
+    const f = { nome: (a, b) => a.nome.localeCompare(b.nome, "pt-BR"), qtd_asc: (a, b) => a.qtd - b.qtd, qtd_desc: (a, b) => b.qtd - a.qtd,
+      total_desc: (a, b) => b.qtd * b.valor - a.qtd * a.valor, total_asc: (a, b) => a.qtd * a.valor - b.qtd * b.valor, unit_desc: (a, b) => b.valor - a.valor };
+    return l.sort(f[ordem]);
+  }, [db.itens, busca, cat, st, ordem]);
+  const totalFiltro = lista.reduce((s, i) => s + i.qtd * i.valor, 0);
+  const excluir = (it) => setConfirmar({ titulo: "Excluir item", perigo: true, botao: "Excluir item",
+    texto: `Excluir ${it.nome} (${it.sku})? O histórico de movimentações dele continua guardado.`,
+    acao: () => mudar((d) => { d.itens = d.itens.filter((x) => x.id !== it.id); }, `${it.nome} excluído.`) });
+  const contagem = (s) => db.itens.filter((i) => statusItem(i) === s).length;
+
+  return html`
+  <section class="flex flex-wrap items-end justify-between gap-3">
+    <div><p class="lbl m-0" style=${{ color: "rgb(var(--accent-ink))" }}>Cadastro</p><h2 class="font-display text-3xl font-bold m-0">Itens em estoque</h2></div>
+    <button class="btn" onClick=${() => setEditar({})}><${Ic} n="Plus" size=${17} /> Novo item</button>
+  </section>
+  <section class="card p-4 flex flex-col gap-3">
+    <div class="grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+      <div class="field"><label class="lbl" for="f-busca">Procurar</label>
+        <div class="relative"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-muted"><${Ic} n="Search" size=${16} /></span>
+        <input id="f-busca" class="inp" style=${{ paddingLeft: 34 }} type="search" placeholder="Nome, SKU/código ou local" value=${busca} onInput=${(e) => setBusca(e.target.value)} /></div></div>
+      <${Campo} id="f-cat" rotulo="Categoria"><select id="f-cat" class="inp" value=${cat} onChange=${(e) => setCat(e.target.value)}><option value="">Todas</option>${cats.map((c) => html`<option key=${c}>${c}</option>`)}</select><//>
+      <${Campo} id="f-st" rotulo="Status"><select id="f-st" class="inp" value=${st} onChange=${(e) => setSt(e.target.value)}>
+        <option value="">Todos</option><option value="Normal">Normal (${contagem("Normal")})</option><option value="Baixo">Estoque baixo (${contagem("Baixo")})</option><option value="Esgotado">Esgotado (${contagem("Esgotado")})</option></select><//>
+      <${Campo} id="f-ord" rotulo="Ordenar por"><select id="f-ord" class="inp" value=${ordem} onChange=${(e) => setOrdem(e.target.value)}>
+        <option value="nome">Nome (A–Z)</option><option value="total_desc">Maior valor total</option><option value="total_asc">Menor valor total</option>
+        <option value="qtd_desc">Maior quantidade</option><option value="qtd_asc">Menor quantidade</option><option value="unit_desc">Maior valor unitário</option></select><//>
+    </div>
+    <p class="m-0 text-sm text-muted">${lista.length} de ${db.itens.length} itens · valor desta seleção: <b class="num text-ink">${brl(totalFiltro)}</b></p>
+  </section>
+  <section class="card overflow-hidden">
+    ${lista.length ? html`<div class="scroll-x"><table class="grid-t">
+      <thead><tr><th>Item</th><th>Categoria</th><th class="r">Saldo</th><th class="r">Mínimo</th><th class="r">Valor unit.</th><th class="r">Valor total</th><th>Status</th><th></th></tr></thead>
+      <tbody>${lista.map((i) => { const s = statusItem(i); return html`<tr key=${i.id}>
+        <td><div class="font-semibold">${i.nome}</div><div class="text-xs text-muted"><span class="font-mono">${i.sku}</span>${i.local ? " · " + i.local : ""}</div></td>
+        <td class="text-sm">${i.categoria}</td>
+        <td class="r num font-semibold">${qtdFmt(i.qtd)} <span class="text-muted font-normal">${i.unidade}</span></td>
+        <td class="r num text-muted">${qtdFmt(i.minimo)}</td>
+        <td class="r num">${brl(i.valor)}</td>
+        <td class="r num font-semibold">${brl(i.qtd * i.valor)}</td>
+        <td><span class=${"chip " + CHIP_STATUS[s]}>${s === "Baixo" ? "Estoque baixo" : s}</span></td>
+        <td><div class="flex gap-1 justify-end">
+          <button class="btn btn-ghost btn-sm" title="Registrar saída" aria-label=${"Saída de " + i.nome} onClick=${() => { setPreMov({ tipo: "Saída", itemId: i.id }); irPara("movimentar"); }}><${Ic} n="ArrowUpFromLine" size=${15} /></button>
+          <button class="btn btn-ghost btn-sm" title="Registrar entrada" aria-label=${"Entrada de " + i.nome} onClick=${() => { setPreMov({ tipo: "Entrada", itemId: i.id }); irPara("movimentar"); }}><${Ic} n="ArrowDownToLine" size=${15} /></button>
+          <button class="btn btn-ghost btn-sm" title="Editar" aria-label=${"Editar " + i.nome} onClick=${() => setEditar(i)}><${Ic} n="Pencil" size=${15} /></button>
+          <button class="btn btn-ghost btn-sm" title="Excluir" aria-label=${"Excluir " + i.nome} onClick=${() => excluir(i)}><${Ic} n="Trash2" size=${15} className="text-bad" /></button>
+        </div></td></tr>`; })}</tbody></table></div>`
+    : html`<${Vazio} icone="Search" texto=${db.itens.length ? "Nenhum item com esses filtros." : "Nenhum item cadastrado ainda."}>
+        ${db.itens.length ? html`<button class="btn btn-ghost" onClick=${() => { setBusca(""); setCat(""); setSt(""); }}>Limpar filtros</button>` : html`<button class="btn" onClick=${() => setEditar({})}><${Ic} n="Plus" size=${16} /> Cadastrar o primeiro item</button>`}<//>`}
+  </section>
+  ${editar ? html`<${ItemForm} item=${editar} db=${db} mudar=${mudar} fechar=${() => setEditar(null)} cats=${cats} />` : null}`;
+}
+
+function ItemForm({ item, db, mudar, fechar, cats }) {
+  const novo = !item.id;
+  const [f, setF] = useState({ nome: item.nome || "", sku: item.sku || "", categoria: item.categoria || "", unidade: item.unidade || "un",
+    qtd: novo ? "0" : "", minimo: String(item.minimo ?? 0), valor: item.valor != null ? String(item.valor).replace(".", ",") : "", local: item.local || "", obs: "" });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const v = { valor: num(f.valor), minimo: num(f.minimo), qtd: num(f.qtd) };
+  const skuRepetido = f.sku.trim() && db.itens.some((i) => i.id !== item.id && norm(i.sku) === norm(f.sku));
+  const erros = { nome: !f.nome.trim() && "Informe o nome.", sku: !f.sku.trim() ? "Informe o SKU/código." : skuRepetido && "Já existe um item com esse código.",
+    valor: !(v.valor >= 0) && "Informe um valor (ex.: 18,90).", minimo: !(v.minimo >= 0) && "Use 0 ou mais.",
+    qtd: novo ? !(v.qtd >= 0) && "Use 0 ou mais." : f.qtd !== "" && !(v.qtd >= 0) && "Use 0 ou mais." };
+  const ok = !Object.values(erros).some(Boolean);
+  const qtdBase = novo ? v.qtd || 0 : f.qtd !== "" && v.qtd >= 0 ? v.qtd : item.qtd;
+  const enviar = (e) => {
+    e.preventDefault(); if (!ok) return;
+    const dados = { nome: f.nome.trim().toUpperCase(), sku: f.sku.trim().toUpperCase(), categoria: f.categoria.trim() || "Geral", unidade: f.unidade, minimo: v.minimo, valor: v.valor, local: f.local.trim() };
+    const feito = mudar((d) => {
+      if (novo) {
+        const it = { id: uid("i"), ...dados, qtd: 0, criadoEm: agora() };
+        d.itens.push(it); d.exemplo = d.exemplo && true;
+        if (v.qtd > 0) aplicarMov(d, { tipo: "Entrada", itemId: it.id, qtd: v.qtd, origem: "Cadastro", obs: "Saldo inicial" });
+      } else {
+        const it = d.itens.find((x) => x.id === item.id); Object.assign(it, dados);
+        if (f.qtd !== "" && v.qtd !== it.qtd) {
+          const delta = Math.round((v.qtd - it.qtd) * 1000) / 1000;
+          aplicarMov(d, { tipo: "Ajuste", itemId: it.id, qtd: delta, origem: "Contagem", obs: f.obs.trim() || `Ajuste de contagem: ${qtdFmt(it.qtd)} → ${qtdFmt(v.qtd)}` });
+        }
+      }
+    }, novo ? `${dados.nome} cadastrado.` : `${dados.nome} atualizado.`);
+    if (feito) fechar();
+  };
+  return html`<${Modal} titulo=${novo ? "Novo item" : "Editar item"} onClose=${fechar}>
+    <form class="flex flex-col gap-4" onSubmit=${enviar} noValidate>
+      <${Campo} id="it-nome" rotulo="Nome do item" erro=${f.nome && erros.nome}><input id="it-nome" class="inp" value=${f.nome} onInput=${set("nome")} placeholder="CABO DE REDE CAT6" autoFocus /><//>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <${Campo} id="it-sku" rotulo="SKU / código" erro=${f.sku && erros.sku}><input id="it-sku" class="inp font-mono" aria-invalid=${!!(f.sku && erros.sku)} value=${f.sku} onInput=${set("sku")} placeholder="CB-06" /><//>
+        <${Campo} id="it-cat" rotulo="Categoria"><input id="it-cat" class="inp" list="lista-cats" value=${f.categoria} onInput=${set("categoria")} placeholder="Rede e cabos" /><datalist id="lista-cats">${cats.map((c) => html`<option key=${c} value=${c} />`)}</datalist><//>
+        <${Campo} id="it-un" rotulo="Unidade de medida"><select id="it-un" class="inp" value=${f.unidade} onChange=${set("unidade")}>${UNIDADES.map((u) => html`<option key=${u}>${u}</option>`)}</select><//>
+        <${Campo} id="it-local" rotulo="Local (estante · PT · caixa)"><input id="it-local" class="inp" value=${f.local} onInput=${set("local")} placeholder="Estante 3 · PT2 · Caixa 12" /><//>
+        <${Campo} id="it-qtd" rotulo=${novo ? "Quantidade inicial" : "Saldo contado (opcional)"} erro=${erros.qtd} dica=${novo ? "Vira uma entrada \"Saldo inicial\" no histórico." : `Hoje: ${qtdFmt(item.qtd)} ${item.unidade}. Se mudar, fica registrado como ajuste.`}>
+          <input id="it-qtd" class="inp num" inputMode="decimal" value=${f.qtd} onInput=${set("qtd")} placeholder=${novo ? "0" : qtdFmt(item.qtd)} /><//>
+        <${Campo} id="it-min" rotulo="Estoque mínimo" erro=${erros.minimo} dica="Abaixo ou igual a isso, o item entra em alerta."><input id="it-min" class="inp num" inputMode="decimal" value=${f.minimo} onInput=${set("minimo")} /><//>
+        <${Campo} id="it-valor" rotulo="Valor unitário (R$)" erro=${f.valor && erros.valor}><input id="it-valor" class="inp num" inputMode="decimal" value=${f.valor} onInput=${set("valor")} placeholder="18,90" /><//>
+        <div class="field"><span class="lbl">Valor total em estoque</span><div class="inp num font-semibold" style=${{ background: "rgb(var(--surface2))" }} aria-live="polite">${brl((v.valor >= 0 ? v.valor : 0) * (qtdBase || 0))}</div></div>
+      </div>
+      ${!novo && f.qtd !== "" ? html`<${Campo} id="it-obs" rotulo="Motivo do ajuste"><input id="it-obs" class="inp" value=${f.obs} onInput=${set("obs")} placeholder="Contagem de inventário" /><//>` : null}
+      <div class="flex flex-wrap justify-end gap-2"><button type="button" class="btn btn-ghost" onClick=${fechar}>Cancelar</button><button class="btn" disabled=${!ok}><${Ic} n="CircleCheck" size=${17} /> ${novo ? "Cadastrar" : "Salvar"}</button></div>
+    </form><//>`;
+}
+
+/* ================= aba: Movimentar ================= */
+function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
+  const [tipo, setTipo] = useState(preMov?.tipo || "Saída");
+  const vazio = { itemId: preMov?.itemId || "", qtd: "1", destino: "", operadorId: "", os: "", nf: "", obs: "", novoValor: "", modoValor: "medio" };
+  const [f, setF] = useState(vazio);
+  useEffect(() => { if (preMov) setPreMov(null); }, []);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const it = db.itens.find((i) => i.id === f.itemId);
+  const q = num(f.qtd);
+  const ativos = db.operadores.filter((o) => o.status === "Ativo");
+  const nv = num(f.novoValor);
+  const erros = {
+    item: !it && "Escolha o item.",
+    qtd: !(q > 0) ? "Informe uma quantidade maior que zero." : tipo === "Saída" && it && q > it.qtd ? `Saldo insuficiente: há ${qtdFmt(it.qtd)} ${it.unidade}.` : null,
+    destino: tipo === "Saída" && !f.destino.trim() && "O destino é obrigatório.",
+    operador: tipo === "Saída" && !f.operadorId && "Escolha quem retirou.",
+    valor: tipo === "Entrada" && f.novoValor.trim() && !(nv >= 0) && "Valor inválido.",
+  };
+  const ok = !Object.values(erros).some(Boolean);
+  const [tocado, setTocado] = useState(false);
+  const precoNovo = it && tipo === "Entrada" && nv >= 0 && f.novoValor.trim() ? (f.modoValor === "substituir" ? nv : (it.qtd > 0 ? (it.qtd * it.valor + q * nv) / (it.qtd + (q || 0)) : nv)) : null;
+  const ultimos = db.movs.slice(-8).reverse();
+  const enviar = (e) => {
+    e.preventDefault(); setTocado(true); if (!ok) return;
+    const op = db.operadores.find((o) => o.id === f.operadorId);
+    const feito = mudar((d) => aplicarMov(d, { tipo, itemId: f.itemId, qtd: q, destino: f.destino, operador: op, os: f.os.trim(), nf: f.nf.trim(), obs: f.obs.trim(),
+      novoValor: tipo === "Entrada" && f.novoValor.trim() ? nv : null, modoValor: f.modoValor }),
+      (m) => `${tipo} registrada: ${qtdFmt(m.qtd)} ${m.unidade} de ${m.nome}. Saldo: ${qtdFmt(m.saldoApos)}.`);
+    if (feito) { setF({ ...vazio, itemId: "", destino: tipo === "Saída" ? f.destino : "", operadorId: tipo === "Saída" ? f.operadorId : "" }); setTocado(false); }
+  };
+  const porCat = useMemo(() => { const g = {}; db.itens.forEach((i) => (g[i.categoria] = g[i.categoria] || []).push(i)); return Object.entries(g).sort(); }, [db.itens]);
+  const sai = tipo === "Saída";
+  return html`
+  <section><p class="lbl m-0" style=${{ color: "rgb(var(--accent-ink))" }}>Operação</p><h2 class="font-display text-3xl font-bold m-0">Registrar movimentação</h2></section>
+  <div class="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] items-start">
+    <form class="card overflow-hidden" onSubmit=${enviar} noValidate style=${{ borderTop: `4px solid rgb(var(${sai ? "--btn-out" : "--btn-in"}))` }}>
+      <div class="p-4 border-b border-line"><div class="grid grid-cols-2 gap-1.5 p-1.5 rounded-xl bg-surface2 border border-line" role="group" aria-label="Tipo">
+        ${["Saída", "Entrada"].map((t) => html`<button type="button" key=${t} onClick=${() => { setTipo(t); setTocado(false); }} aria-pressed=${tipo === t}
+          class=${"flex items-center justify-center gap-2 py-2.5 rounded-lg font-display font-bold uppercase tracking-wider text-[1.05rem] " + (tipo === t ? (t === "Saída" ? "btn-out" : "btn-in") : "bg-transparent text-muted hover:text-ink")}
+          style=${{ border: 0 }}><${Ic} n=${t === "Saída" ? "ArrowUpFromLine" : "ArrowDownToLine"} size=${18} /> ${t}</button>`)}</div></div>
+      <div class="p-5 flex flex-col gap-4">
+        <${Campo} id="mv-item" rotulo="Item" erro=${tocado && erros.item}>
+          <select id="mv-item" class="inp" value=${f.itemId} onChange=${set("itemId")} aria-invalid=${!!(tocado && erros.item)}>
+            <option value="">Escolha o item…</option>
+            ${porCat.map(([c, its]) => html`<optgroup key=${c} label=${c}>${its.map((i) => html`<option key=${i.id} value=${i.id}>${i.sku} · ${i.nome} — saldo ${qtdFmt(i.qtd)} ${i.unidade}</option>`)}</optgroup>`)}
+          </select><//>
+        ${it ? html`<div class="flex flex-wrap gap-x-5 gap-y-1 text-sm p-3 rounded-lg bg-surface2 border border-line">
+          <span>Saldo: <b class="num">${qtdFmt(it.qtd)} ${it.unidade}</b></span><span>Valor unit.: <b class="num">${brl(it.valor)}</b></span>
+          ${it.local ? html`<span class="text-muted">${it.local}</span>` : null}<span class=${"chip " + CHIP_STATUS[statusItem(it)]}>${statusItem(it) === "Baixo" ? "Estoque baixo" : statusItem(it)}</span></div>` : null}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <${Campo} id="mv-qtd" rotulo=${"Quantidade" + (it ? ` (${it.unidade})` : "")} erro=${(tocado || (sai && it && q > it.qtd)) && erros.qtd}>
+            <input id="mv-qtd" class="inp num" inputMode="decimal" value=${f.qtd} onInput=${set("qtd")} aria-invalid=${!!((tocado || (sai && it && q > it.qtd)) && erros.qtd)} /><//>
+          <div class="field"><span class="lbl">Valor movimentado</span><div class="inp num font-semibold" style=${{ background: "rgb(var(--surface2))" }}>${brl(it && q > 0 ? q * (precoNovo ?? it.valor) : 0)}</div></div>
+        </div>
+        ${sai ? html`
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <${Campo} id="mv-dest" rotulo="Destino" erro=${tocado && erros.destino} dica="Setor, obra, cliente ou centro de custo.">
+              <input id="mv-dest" class="inp" list="lista-destinos" value=${f.destino} onInput=${set("destino")} placeholder="Montagem" aria-invalid=${!!(tocado && erros.destino)} />
+              <datalist id="lista-destinos">${destinos.map((d) => html`<option key=${d} value=${d} />`)}</datalist><//>
+            <${Campo} id="mv-op" rotulo="Operador responsável" erro=${tocado && erros.operador} dica=${ativos.length ? "Só operadores ativos aparecem aqui." : null}>
+              <select id="mv-op" class="inp" value=${f.operadorId} onChange=${set("operadorId")} aria-invalid=${!!(tocado && erros.operador)}>
+                <option value="">Quem retirou?</option>${ativos.map((o) => html`<option key=${o.id} value=${o.id}>${o.nome} · ${o.matricula} · ${o.setor}</option>`)}</select><//>
+          </div>
+          ${!ativos.length ? html`<p class="m-0 text-sm text-warn">Nenhum operador ativo. <button type="button" class="underline font-semibold" onClick=${() => irPara("operadores")}>Cadastre um operador</button> antes de registrar saídas.</p>` : null}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <${Campo} id="mv-os" rotulo="Ordem de serviço"><input id="mv-os" class="inp font-mono" value=${f.os} onInput=${set("os")} placeholder="0000/00" /><//>
+            <${Campo} id="mv-obs" rotulo="Observação"><input id="mv-obs" class="inp" value=${f.obs} onInput=${set("obs")} placeholder="Serial, motivo…" /><//>
+          </div>` : html`
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <${Campo} id="mv-nf" rotulo="Nota fiscal / documento"><input id="mv-nf" class="inp font-mono" value=${f.nf} onInput=${set("nf")} placeholder="123" /><//>
+            <${Campo} id="mv-obs2" rotulo="Fornecedor / observação"><input id="mv-obs2" class="inp" value=${f.obs} onInput=${set("obs")} placeholder="Fornecedor X" /><//>
+            <${Campo} id="mv-val" rotulo="Novo valor unitário (opcional)" erro=${erros.valor} dica=${it ? `Atual: ${brl(it.valor)}` : null}><input id="mv-val" class="inp num" inputMode="decimal" value=${f.novoValor} onInput=${set("novoValor")} placeholder="Deixe vazio para manter" /><//>
+            <${Campo} id="mv-modo" rotulo="Como atualizar o valor"><select id="mv-modo" class="inp" value=${f.modoValor} onChange=${set("modoValor")} disabled=${!f.novoValor.trim()}>
+              <option value="medio">Custo médio ponderado</option><option value="substituir">Substituir pelo novo valor</option></select><//>
+          </div>
+          ${precoNovo != null ? html`<p class="m-0 text-sm">Valor unitário passa de <b class="num">${brl(it.valor)}</b> para <b class="num">${brl(precoNovo)}</b>.</p>` : null}`}
+      </div>
+      <div class="px-5 py-3 border-t border-line bg-surface2 flex justify-end">
+        <button class=${"btn w-full sm:w-auto " + (sai ? "btn-out" : "btn-in")} disabled=${tocado && !ok}><${Ic} n=${sai ? "ArrowUpFromLine" : "ArrowDownToLine"} size=${17} /> Registrar ${sai ? "saída" : "entrada"}</button>
+      </div>
+    </form>
+    <section class="card overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-line"><h3 class="font-display text-lg font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="Clock" size=${17} /> Últimos registros</h3>
+        <button class="btn btn-ghost btn-sm" onClick=${() => irPara("historico")}>Ver histórico</button></div>
+      ${ultimos.length ? html`<ul class="m-0 p-0 list-none">${ultimos.map((m) => html`<li key=${m.id} class="px-4 py-3 border-b border-line last:border-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3">
+        <span class=${"num font-semibold text-sm px-2 py-0.5 rounded h-fit " + (m.tipo === "Saída" ? "bg-bad-soft text-bad" : m.tipo === "Entrada" ? "bg-good-soft text-good" : "bg-info-soft text-info")}>${m.tipo === "Saída" ? "−" : m.qtd < 0 ? "−" : "+"}${qtdFmt(Math.abs(m.qtd))}</span>
+        <span class="min-w-0"><span class="font-semibold block truncate">${m.nome}</span>
+        <span class="text-xs text-muted block">${dataHora(m.dataHora)}${m.destino ? " · " + m.destino : ""}${m.operadorNome ? " · " + m.operadorNome : ""}${m.origem !== "Manual" ? " · " + m.origem : ""}</span></span></li>`)}</ul>`
+      : html`<${Vazio} texto="Nenhuma movimentação ainda." />`}
+    </section>
+  </div>`;
+}
+
+/* ================= aba: Histórico ================= */
+function Historico({ db, baixar }) {
+  const [f, setF] = useState({ busca: "", tipo: "", destino: "", operador: "", de: "", ate: "" });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const destinos = useMemo(() => [...new Set(db.movs.map((m) => m.destino).filter(Boolean))].sort(), [db.movs]);
+  const ops = useMemo(() => [...new Set(db.movs.map((m) => m.operadorNome).filter(Boolean))].sort(), [db.movs]);
+  const lista = useMemo(() => {
+    const t = norm(f.busca);
+    return db.movs.filter((m) => (!t || [m.nome, m.sku, m.obs, m.nf, m.os, m.origem].some((x) => norm(x).includes(t)))
+      && (!f.tipo || m.tipo === f.tipo) && (!f.destino || m.destino === f.destino) && (!f.operador || m.operadorNome === f.operador)
+      && (!f.de || isoLocal(new Date(m.dataHora)).slice(0, 10) >= f.de) && (!f.ate || isoLocal(new Date(m.dataHora)).slice(0, 10) <= f.ate)).slice().reverse();
+  }, [db.movs, f]);
+  const tot = lista.reduce((a, m) => { if (m.tipo === "Entrada") a.e += m.valorTotal; else if (m.tipo === "Saída") a.s += m.valorTotal; return a; }, { e: 0, s: 0 });
+  const exportar = () => baixar(`Movimentacao ${new Date().toISOString().slice(0, 10)}.csv`, paraCsv([
+    ["Nº", "Data", "Hora", "Movimentação", "SKU", "Descrição", "Unid.", "Quantidade", "Valor unit. (R$)", "Valor total (R$)", "Destino / Área", "Operador", "Matrícula", "OS", "NF", "Origem", "Observação", "Saldo após"],
+    ...lista.slice().reverse().map((m) => { const d = new Date(m.dataHora); return [m.n, d.toLocaleDateString("pt-BR"), d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }), m.tipo, m.sku, m.nome, m.unidade,
+      String(m.tipo === "Saída" ? -m.qtd : m.qtd).replace(".", ","), String(m.valorUnit.toFixed(2)).replace(".", ","), String(m.valorTotal.toFixed(2)).replace(".", ","),
+      m.destino, m.operadorNome, m.operadorMatricula, m.os, m.nf, m.origem, m.obs, String(m.saldoApos).replace(".", ",")]; })]));
+  return html`
+  <section class="flex flex-wrap items-end justify-between gap-3">
+    <div><p class="lbl m-0" style=${{ color: "rgb(var(--accent-ink))" }}>Auditoria</p><h2 class="font-display text-3xl font-bold m-0">Histórico de movimentações</h2></div>
+    <button class="btn btn-ghost" onClick=${exportar} disabled=${!lista.length}><${Ic} n="FileSpreadsheet" size=${16} /> Exportar CSV (${lista.length})</button>
+  </section>
+  <section class="card p-4 grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+    <${Campo} id="h-busca" rotulo="Procurar"><input id="h-busca" class="inp" type="search" value=${f.busca} onInput=${set("busca")} placeholder="Item, SKU, NF, OS, R-0001" /><//>
+    <${Campo} id="h-tipo" rotulo="Tipo"><select id="h-tipo" class="inp" value=${f.tipo} onChange=${set("tipo")}><option value="">Todos</option><option>Entrada</option><option>Saída</option><option>Ajuste</option></select><//>
+    <${Campo} id="h-dest" rotulo="Destino"><select id="h-dest" class="inp" value=${f.destino} onChange=${set("destino")}><option value="">Todos</option>${destinos.map((d) => html`<option key=${d}>${d}</option>`)}</select><//>
+    <${Campo} id="h-op" rotulo="Operador"><select id="h-op" class="inp" value=${f.operador} onChange=${set("operador")}><option value="">Todos</option>${ops.map((d) => html`<option key=${d}>${d}</option>`)}</select><//>
+    <${Campo} id="h-de" rotulo="De"><input id="h-de" class="inp" type="date" value=${f.de} onInput=${set("de")} /><//>
+    <${Campo} id="h-ate" rotulo="Até"><input id="h-ate" class="inp" type="date" value=${f.ate} onInput=${set("ate")} /><//>
+  </section>
+  <section class="flex flex-wrap gap-2 text-sm">
+    <span class="chip chip-plain">${lista.length} registro(s)</span><span class="chip chip-ok">Entradas ${brl(tot.e)}</span><span class="chip chip-bad">Saídas ${brl(tot.s)}</span>
+  </section>
+  <section class="card overflow-hidden">
+    ${lista.length ? html`<div class="scroll-x" style=${{ maxHeight: "70vh" }}><table class="grid-t">
+      <thead><tr><th>#</th><th>Data/hora</th><th>Tipo</th><th>Item</th><th class="r">Qtd</th><th class="r">Valor</th><th>Destino</th><th>Operador</th><th>Doc.</th><th>Origem</th><th class="r">Saldo após</th></tr></thead>
+      <tbody>${lista.map((m) => html`<tr key=${m.id}>
+        <td class="num text-muted">${m.n}</td><td class="num text-sm whitespace-nowrap">${dataHora(m.dataHora)}</td>
+        <td><span class=${"chip " + (m.tipo === "Saída" ? "chip-bad" : m.tipo === "Entrada" ? "chip-ok" : "chip-info")}>${m.tipo}</span></td>
+        <td><div class="font-semibold">${m.nome}</div><div class="text-xs text-muted font-mono">${m.sku}${m.obs ? html`<span class="font-sans"> · ${m.obs}</span>` : null}</div></td>
+        <td class=${"r num font-semibold " + (m.tipo === "Saída" || m.qtd < 0 ? "text-bad" : "text-good")}>${m.tipo === "Saída" || m.qtd < 0 ? "−" : "+"}${qtdFmt(Math.abs(m.qtd))} <span class="text-muted font-normal">${m.unidade}</span></td>
+        <td class="r num">${brl(m.valorTotal)}<div class="text-xs text-muted">${brl(m.valorUnit)}/${m.unidade}</div></td>
+        <td>${m.destino || html`<span class="text-muted">—</span>`}</td>
+        <td>${m.operadorNome ? html`${m.operadorNome}<div class="text-xs text-muted font-mono">${m.operadorMatricula}</div>` : html`<span class="text-muted">—</span>`}</td>
+        <td class="text-sm font-mono">${[m.nf && "NF " + m.nf, m.os && "OS " + m.os].filter(Boolean).join(" · ") || html`<span class="text-muted font-sans">—</span>`}</td>
+        <td class="text-sm">${m.origem}</td><td class="r num">${qtdFmt(m.saldoApos)}</td></tr>`)}</tbody></table></div>`
+    : html`<${Vazio} icone="History" texto="Nenhuma movimentação com esses filtros." />`}
+  </section>`;
+}
+
+/* ================= aba: Requisições ================= */
+function Requisicoes({ db, mudar, avisar, irPara, setConfirmar }) {
+  const [verTodas, setVerTodas] = useState(false);
+  const [recusa, setRecusa] = useState({});
+  const pend = db.requisicoes.filter((r) => r.status === "Pendente").slice().reverse();
+  const feitas = db.requisicoes.filter((r) => r.status !== "Pendente").slice().reverse();
+  const simular = () => mudar((d) => {
+    const ativos = d.operadores.filter((o) => o.status === "Ativo"); const comSaldo = d.itens.filter((i) => i.qtd > 0);
+    if (!ativos.length || !d.itens.length) throw new Error("Cadastre ao menos um item e um operador ativo para simular.");
+    const sorte = Math.random(); const op = ativos[Math.floor(Math.random() * ativos.length)];
+    const it = (comSaldo.length ? comSaldo : d.itens)[Math.floor(Math.random() * (comSaldo.length || d.itens.length))];
+    const prev = new Date(Date.now() + (2 + Math.floor(Math.random() * 46)) * 36e5); prev.setMinutes(0, 0, 0);
+    const destinosEx = ["Montagem", "Manutenção", "Obra Centro", "OPERADOR", "Expedição"];
+    return novaRequisicao(d, { matricula: sorte < 0.15 ? "OP-099" : op.matricula, item: Math.random() < 0.5 ? it.sku : it.nome,
+      qtd: sorte > 0.85 ? Math.ceil(it.qtd + 2) : Math.max(1, Math.min(it.qtd || 1, 1 + Math.floor(Math.random() * 3))),
+      destino: destinosEx[Math.floor(Math.random() * destinosEx.length)], previsto: isoLocal(prev), obs: "Recebida pela simulação", fonte: "Simulação" });
+  }, (r) => `Requisição ${r.num} recebida (simulação).`);
+  const aprovar = (r) => {
+    const { op, it, ok } = checarRequisicao(db, r);
+    if (!ok) return avisar("Essa requisição ainda não passa em todas as conferências.", "bad");
+    setConfirmar({ titulo: `Aprovar ${r.num}`, botao: "Aprovar e dar baixa",
+      texto: `Dar baixa de ${qtdFmt(r.qtd)} ${it.unidade} de ${it.nome} (${brl(r.qtd * it.valor)}) para ${r.destino}, retirado por ${op.nome}?`,
+      acao: () => mudar((d) => {
+        const rr = d.requisicoes.find((x) => x.id === r.id); const c = checarRequisicao(d, rr);
+        if (!c.ok) throw new Error("O estoque ou o cadastro mudou: confira de novo.");
+        const m = aplicarMov(d, { tipo: "Saída", itemId: c.it.id, qtd: rr.qtd, destino: rr.destino, operador: c.op, origem: "Requisição " + rr.num,
+          obs: [rr.obs, rr.previsto && "retirada prevista " + (isNaN(new Date(rr.previsto)) ? rr.previsto : dataHora(rr.previsto))].filter(Boolean).join(" · ") });
+        Object.assign(rr, { status: "Aprovada", movId: m.id, itemId: c.it.id, decididoEm: agora() });
+        return m;
+      }, (m) => `${r.num} aprovada: saída de ${qtdFmt(m.qtd)} ${m.unidade} de ${m.nome}. Saldo: ${qtdFmt(m.saldoApos)}.`) });
+  };
+  const recusar = (r) => { const motivo = (recusa[r.id] || "").trim(); if (!motivo) return avisar("Escreva o motivo da recusa.", "warn");
+    mudar((d) => { Object.assign(d.requisicoes.find((x) => x.id === r.id), { status: "Recusada", motivo, decididoEm: agora() }); }, `${r.num} recusada.`); };
+  const escolherItem = (r, id) => mudar((d) => { d.requisicoes.find((x) => x.id === r.id).itemId = id; });
+
+  return html`
+  <section class="flex flex-wrap items-end justify-between gap-3">
+    <div><p class="lbl m-0" style=${{ color: "rgb(var(--accent-ink))" }}>Formulário externo</p><h2 class="font-display text-3xl font-bold m-0">Requisições pendentes</h2>
+      <p class="m-0 text-sm text-muted max-w-2xl">Pedidos antecipados que chegam pelo formulário. Confira, aprove e o estoque baixa sozinho com o destino e o operador.</p></div>
+    <div class="flex flex-wrap gap-2"><button class="btn btn-ghost" onClick=${() => irPara("integracao")}><${Ic} n="PlugZap" size=${16} /> Conectar formulário</button>
+      <button class="btn" onClick=${simular}><${Ic} n="Send" size=${16} /> Simular recebimento de formulário</button></div>
+  </section>
+  ${pend.length ? html`<div class="grid gap-4" style=${{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 360px), 1fr))" }}>
+    ${pend.map((r) => { const c = checarRequisicao(db, r); return html`<article key=${r.id} class="card overflow-hidden flex flex-col" style=${{ borderTop: `4px solid rgb(var(${c.ok ? "--good" : "--warn"}))` }}>
+      <div class="px-4 pt-4 pb-3 flex flex-col gap-1">
+        <div class="flex items-center justify-between gap-2"><span class="font-mono font-semibold text-sm px-2 py-0.5 rounded bg-surface2 border border-line">${r.num}</span>
+          <span class=${"chip " + (c.ok ? "chip-ok" : "chip-warn")}>${c.ok ? "Pronta para aprovar" : "Precisa de atenção"}</span></div>
+        <h3 class="font-display text-xl font-bold m-0 mt-1">${qtdFmt(r.qtd)} × ${c.it ? c.it.nome : r.item || "?"}</h3>
+        <p class="m-0 text-xs text-muted">${r.fonte} · recebida ${dataHora(r.recebidaEm)}${r.previsto ? html` · <b class="text-ink">retirada ${isNaN(new Date(r.previsto)) ? r.previsto : dataHora(r.previsto)}</b>` : null}</p>
+      </div>
+      <ul class="m-0 px-4 pb-3 list-none flex flex-col gap-1.5 text-sm">
+        ${c.checks.map((k, i) => html`<li key=${i} class=${"flex gap-2 items-start " + (k.ok ? "" : "text-bad font-medium")}><${Ic} n=${k.ok ? "CircleCheck" : "CircleX"} size=${16} className=${"mt-0.5 shrink-0 " + (k.ok ? "text-good" : "")} /><span>${k.txt}</span></li>`)}
+        ${r.obs ? html`<li class="text-muted text-xs pl-6">Obs.: ${r.obs}</li>` : null}
+      </ul>
+      ${!c.it ? html`<div class="px-4 pb-3"><${Campo} id=${"ri-" + r.id} rotulo="Qual item do cadastro é esse?">
+        <select id=${"ri-" + r.id} class="inp" value="" onChange=${(e) => escolherItem(r, e.target.value)}><option value="">Escolha…</option>${db.itens.map((i) => html`<option key=${i.id} value=${i.id}>${i.sku} · ${i.nome}</option>`)}</select><//></div>` : null}
+      <div class="mt-auto px-4 py-3 border-t border-line bg-surface2 flex flex-col gap-2">
+        <button class="btn btn-out w-full" disabled=${!c.ok} onClick=${() => aprovar(r)}><${Ic} n="ArrowUpFromLine" size=${16} /> Aprovar e dar baixa</button>
+        <div class="flex gap-2"><input class="inp text-sm" aria-label=${"Motivo da recusa de " + r.num} placeholder="Motivo para recusar" value=${recusa[r.id] || ""} onInput=${(e) => setRecusa({ ...recusa, [r.id]: e.target.value })} />
+          <button class="btn btn-ghost btn-sm" onClick=${() => recusar(r)}>Recusar</button></div>
+      </div></article>`; })}
+  </div>` : html`<div class="card"><${Vazio} icone="Inbox" texto="Nenhuma requisição pendente. As respostas do formulário aparecem aqui; teste com o botão de simulação."><button class="btn" onClick=${simular}><${Ic} n="Send" size=${16} /> Simular recebimento</button><//></div>`}
+  ${feitas.length ? html`<section class="card overflow-hidden">
+    <button class="w-full flex items-center justify-between px-4 py-3 text-left font-display text-lg font-bold uppercase tracking-wide" style=${{ background: "none", border: 0, color: "inherit", cursor: "pointer" }} onClick=${() => setVerTodas(!verTodas)} aria-expanded=${verTodas}>
+      <span class="flex items-center gap-2"><${Ic} n="History" size=${17} /> Já decididas (${feitas.length})</span><${Ic} n=${verTodas ? "ChevronUp" : "ChevronDown"} size=${18} /></button>
+    ${verTodas ? html`<div class="scroll-x border-t border-line"><table class="grid-t"><thead><tr><th>Nº</th><th>Situação</th><th>Item</th><th class="r">Qtd</th><th>Operador</th><th>Destino</th><th>Decidida em</th><th>Motivo</th></tr></thead>
+      <tbody>${feitas.map((r) => { const it = db.itens.find((i) => i.id === r.itemId); const op = acharOperador(db, r.matricula); return html`<tr key=${r.id}><td class="font-mono">${r.num}</td>
+        <td><span class=${"chip " + (r.status === "Aprovada" ? "chip-ok" : "chip-bad")}>${r.status}</span></td><td>${it ? it.nome : r.item}</td><td class="r num">${qtdFmt(r.qtd)}</td>
+        <td>${op ? op.nome : r.matricula}</td><td>${r.destino}</td><td class="num text-sm">${dataHora(r.decididoEm)}</td><td class="text-sm">${r.motivo || "—"}</td></tr>`; })}</tbody></table></div>` : null}
+  </section>` : null}`;
+}
+
+/* ================= aba: Operadores ================= */
+function Operadores({ db, mudar, setConfirmar }) {
+  const [editar, setEditar] = useState(null);
+  const [filtro, setFiltro] = useState("");
+  const retiradas = useMemo(() => { const c = {}; db.movs.forEach((m) => { if (m.operadorId && m.tipo === "Saída") { c[m.operadorId] = c[m.operadorId] || { n: 0, v: 0 }; c[m.operadorId].n++; c[m.operadorId].v += m.valorTotal; } }); return c; }, [db.movs]);
+  const lista = db.operadores.filter((o) => !filtro || o.status === filtro);
+  const alternar = (o) => mudar((d) => { const x = d.operadores.find((y) => y.id === o.id); x.status = x.status === "Ativo" ? "Inativo" : "Ativo"; }, `${o.nome} agora está ${o.status === "Ativo" ? "inativo" : "ativo"}.`);
+  const excluir = (o) => retiradas[o.id]
+    ? setConfirmar({ titulo: "Operador com histórico", texto: `${o.nome} tem ${retiradas[o.id].n} retirada(s) no histórico. Para manter a auditoria, ele será marcado como inativo em vez de excluído.`, botao: "Marcar como inativo",
+        acao: () => mudar((d) => { d.operadores.find((y) => y.id === o.id).status = "Inativo"; }, `${o.nome} marcado como inativo.`) })
+    : setConfirmar({ titulo: "Excluir operador", perigo: true, botao: "Excluir", texto: `Excluir ${o.nome} (${o.matricula})?`, acao: () => mudar((d) => { d.operadores = d.operadores.filter((y) => y.id !== o.id); }, `${o.nome} excluído.`) });
+  return html`
+  <section class="flex flex-wrap items-end justify-between gap-3">
+    <div><p class="lbl m-0" style=${{ color: "rgb(var(--accent-ink))" }}>Autorização</p><h2 class="font-display text-3xl font-bold m-0">Operadores autorizados</h2>
+      <p class="m-0 text-sm text-muted max-w-2xl">Só operadores ativos podem ser vinculados às saídas e às requisições do formulário.</p></div>
+    <div class="flex flex-wrap gap-2 items-center"><select class="inp w-auto" aria-label="Filtrar status" value=${filtro} onChange=${(e) => setFiltro(e.target.value)}><option value="">Todos</option><option>Ativo</option><option>Inativo</option></select>
+      <button class="btn" onClick=${() => setEditar({})}><${Ic} n="Plus" size=${17} /> Novo operador</button></div>
+  </section>
+  <section class="card overflow-hidden">${lista.length ? html`<div class="scroll-x"><table class="grid-t">
+    <thead><tr><th>Operador</th><th>Matrícula</th><th>Setor / cargo</th><th>Nível</th><th>Status</th><th class="r">Retiradas</th><th></th></tr></thead>
+    <tbody>${lista.map((o) => html`<tr key=${o.id}>
+      <td class="font-semibold">${o.nome}</td><td class="font-mono">${o.matricula}</td><td>${o.setor}<div class="text-xs text-muted">${o.cargo}</div></td>
+      <td><span class=${"chip " + (o.nivel === "Gestor" ? "chip-info" : o.nivel === "Supervisor" ? "chip-warn" : "chip-plain")}>${o.nivel}</span></td>
+      <td><button class=${"chip " + (o.status === "Ativo" ? "chip-ok" : "chip-bad")} style=${{ border: 0, cursor: "pointer" }} onClick=${() => alternar(o)} title="Clique para alternar">${o.status}</button></td>
+      <td class="r num">${retiradas[o.id] ? html`${retiradas[o.id].n}<div class="text-xs text-muted">${brl(retiradas[o.id].v)}</div>` : "0"}</td>
+      <td><div class="flex gap-1 justify-end"><button class="btn btn-ghost btn-sm" aria-label=${"Editar " + o.nome} onClick=${() => setEditar(o)}><${Ic} n="Pencil" size=${15} /></button>
+        <button class="btn btn-ghost btn-sm" aria-label=${"Excluir " + o.nome} onClick=${() => excluir(o)}><${Ic} n="Trash2" size=${15} className="text-bad" /></button></div></td></tr>`)}</tbody></table></div>`
+    : html`<${Vazio} icone="Users" texto="Nenhum operador com esse filtro." />`}</section>
+  ${editar ? html`<${OperadorForm} op=${editar} db=${db} mudar=${mudar} fechar=${() => setEditar(null)} />` : null}`;
+}
+function OperadorForm({ op, db, mudar, fechar }) {
+  const novo = !op.id;
+  const [f, setF] = useState({ nome: op.nome || "", matricula: op.matricula || "", setor: op.setor || "", cargo: op.cargo || "", status: op.status || "Ativo", nivel: op.nivel || "Solicitante" });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const rep = f.matricula.trim() && db.operadores.some((o) => o.id !== op.id && norm(o.matricula) === norm(f.matricula));
+  const ok = f.nome.trim() && f.matricula.trim() && !rep && f.setor.trim();
+  const enviar = (e) => { e.preventDefault(); if (!ok) return;
+    const dados = { ...f, nome: f.nome.trim().toUpperCase(), matricula: f.matricula.trim().toUpperCase(), setor: f.setor.trim(), cargo: f.cargo.trim() };
+    if (mudar((d) => { if (novo) d.operadores.push({ id: uid("o"), ...dados }); else Object.assign(d.operadores.find((x) => x.id === op.id), dados); }, `${dados.nome} ${novo ? "cadastrado" : "atualizado"}.`)) fechar(); };
+  return html`<${Modal} titulo=${novo ? "Novo operador" : "Editar operador"} onClose=${fechar}>
+    <form class="flex flex-col gap-4" onSubmit=${enviar} noValidate>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <${Campo} id="op-nome" rotulo="Nome"><input id="op-nome" class="inp" value=${f.nome} onInput=${set("nome")} autoFocus /><//>
+        <${Campo} id="op-mat" rotulo="Matrícula / ID" erro=${rep && "Matrícula já cadastrada."} dica="É o que o operador digita no formulário."><input id="op-mat" class="inp font-mono" value=${f.matricula} onInput=${set("matricula")} placeholder="OP-005" /><//>
+        <${Campo} id="op-setor" rotulo="Setor"><input id="op-setor" class="inp" list="lista-setores" value=${f.setor} onInput=${set("setor")} /><datalist id="lista-setores">${DESTINOS_BASE.concat("Almoxarifado").map((s) => html`<option key=${s} value=${s} />`)}</datalist><//>
+        <${Campo} id="op-cargo" rotulo="Cargo"><input id="op-cargo" class="inp" value=${f.cargo} onInput=${set("cargo")} /><//>
+        <${Campo} id="op-nivel" rotulo="Nível de permissão"><select id="op-nivel" class="inp" value=${f.nivel} onChange=${set("nivel")}>${NIVEIS.map((n) => html`<option key=${n}>${n}</option>`)}</select><//>
+        <${Campo} id="op-st" rotulo="Status"><select id="op-st" class="inp" value=${f.status} onChange=${set("status")}><option>Ativo</option><option>Inativo</option></select><//>
+      </div>
+      <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" onClick=${fechar}>Cancelar</button><button class="btn" disabled=${!ok}>${novo ? "Cadastrar" : "Salvar"}</button></div>
+    </form><//>`;
+}
+
+/* ================= aba: Integração e backup ================= */
+const CAMPOS_FORM = [
+  ["Matrícula do operador", "Resposta curta · obrigatória", "OP-002"],
+  ["Item (SKU ou nome)", "Resposta curta ou lista suspensa · obrigatória", "CB-06"],
+  ["Quantidade", "Resposta curta com validação: número maior que 0", "2"],
+  ["Data e hora prevista para retirada", "Data e hora", "27/11/2026 08:00"],
+  ["Destino", "Lista suspensa: Montagem, Manutenção, OPERADOR…", "Montagem"],
+  ["Observação", "Parágrafo · opcional", "Linha 2"],
+];
+const APPS_SCRIPT = `// Google Forms > ⋮ > Editor de script. Cole, salve e crie o acionador
+// "Ao enviar formulário" (relógio à esquerda > Adicionar acionador).
+// Ele copia cada resposta para a aba "Requisicoes" com os nomes que o app reconhece.
+function aoEnviarFormulario(e) {
+  const r = e.namedValues; // { "Pergunta": ["resposta"] }
+  const v = (t) => (r[t] || [""])[0];
+  const planilha = SpreadsheetApp.openById("COLE_AQUI_O_ID_DA_PLANILHA");
+  const aba = planilha.getSheetByName("Requisicoes") || planilha.insertSheet("Requisicoes");
+  if (aba.getLastRow() === 0) aba.appendRow(["Carimbo de data/hora", "Matrícula do operador",
+    "Item (SKU ou nome)", "Quantidade", "Data e hora prevista para retirada", "Destino", "Observação"]);
+  aba.appendRow([new Date(), v("Matrícula do operador"), v("Item (SKU ou nome)"),
+    v("Quantidade"), v("Data e hora prevista para retirada"), v("Destino"), v("Observação")]);
+}`;
+
+function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPara }) {
+  const [cfg, setCfg] = useState(db.integracao);
+  const [estado, setEstado] = useState({ lendo: false, msg: "", tom: "", em: null });
+  const [instr, setInstr] = useState(false);
+  const watchRef = useRef(null);
+  useEffect(() => () => watchRef.current && watchRef.current(), []);
+  const salvarCfg = (c) => { setCfg(c); mudar((d) => { d.integracao = c; }); };
+  const receber = useCallback((linhas, fonte) => {
+    const { regs, faltando } = linhasParaRequisicoes(linhas, fonte);
+    if (faltando.length) { setEstado((s) => ({ ...s, lendo: false, tom: "bad", msg: `Não achei as colunas: ${faltando.join(", ")}. Confira os títulos das perguntas.` })); return; }
+    let novas = 0;
+    mudar((d) => { const ja = new Set(d.requisicoes.map((r) => r.chave).filter(Boolean)); regs.forEach((r) => { if (!ja.has(r.chave)) { novaRequisicao(d, r); ja.add(r.chave); novas++; } }); d.exemplo = d.exemplo; });
+    setEstado((s) => ({ ...s, lendo: false, tom: "ok", msg: `${regs.length} resposta(s) lida(s); ${novas} nova(s) requisição(ões).` }));
+    if (novas) avisar(`${novas} requisição(ões) nova(s) do formulário.`);
+  }, [mudar, avisar]);
+  const erroMcp = (e) => {
+    const c = e && e.code;
+    const msg = { needs_reauth: "A conexão com o Google Sheets expirou. Reconecte em claude.ai ▸ Configurações ▸ Conectores.",
+      server_not_connected: "O Google Sheets não está conectado. Adicione em claude.ai ▸ Configurações ▸ Conectores.",
+      selection_required: "Há mais de uma conexão Google Sheets: escolha uma no aviso do claude.ai.",
+      not_in_manifest: "Você não permitiu o Google Sheets para esta página. Libere em Permissões do artefato.",
+      approval_required: "A leitura precisa da sua aprovação. Clique em Buscar respostas de novo e permita.",
+      blocked_by_policy: "A sua organização bloqueia a leitura do Google Sheets aqui.",
+      tool_error: "O Google Sheets recusou a leitura. Confira o ID da planilha e o nome da aba.",
+      server_unavailable: "O Google Sheets não respondeu agora. Tente de novo em instantes." }[c] || "Não consegui ler a planilha agora. Use a importação de CSV enquanto isso.";
+    setEstado((s) => ({ ...s, lendo: false, tom: "bad", msg }));
+  };
+  const range = () => `'${(cfg.aba || "Respostas ao formulário 1").replace(/'/g, "''")}'!A1:Z`;
+  const buscar = async () => {
+    const id = idDaPlanilha(cfg.planilha);
+    if (!id) return setEstado({ lendo: false, tom: "bad", msg: "Cole o link ou o ID da planilha de respostas." });
+    if (!mcp) return setEstado({ lendo: false, tom: "bad", msg: "A leitura direta do Google Sheets não está disponível nesta visualização. Use a importação de CSV." });
+    setEstado({ lendo: true, tom: "", msg: "Lendo a planilha…" });
+    try {
+      const r = await mcp.callTool("Google Sheets", "get_values", { spreadsheetId: id, range: range() }, { cache: false });
+      const v = valoresDaResposta(r.payload);
+      if (!v) return setEstado({ lendo: false, tom: "bad", msg: "A planilha respondeu, mas não encontrei linhas. Confira o nome da aba." });
+      setEstado((s) => ({ ...s, em: new Date() })); receber(v, "Google Sheets");
+    } catch (e) { erroMcp(e); }
+  };
+  useEffect(() => {
+    if (watchRef.current) { watchRef.current(); watchRef.current = null; }
+    const id = idDaPlanilha(cfg.planilha);
+    if (!cfg.auto || !mcp || !id) return;
+    watchRef.current = mcp.watchTool("Google Sheets", "get_values", { spreadsheetId: id, range: range() }, (ev) => {
+      if (ev.type === "data") { const v = valoresDaResposta(ev.result.payload); if (v) { setEstado((s) => ({ ...s, em: new Date(ev.result.cache?.storedAt || Date.now()) })); receber(v, "Google Sheets"); } }
+      else erroMcp(ev.error);
+    }, { refetchInterval: 120000 });
+  }, [cfg.auto, cfg.planilha, cfg.aba, mcp]);
+
+  const lerArquivo = (e, tipo) => {
+    const arq = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!arq) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      const texto = String(fr.result);
+      if (tipo === "csv") return receber(csvLinhas(texto), "Importação CSV");
+      try {
+        const d = JSON.parse(texto);
+        if (!d || !Array.isArray(d.itens) || !Array.isArray(d.movs) || !Array.isArray(d.operadores)) throw new Error();
+        setConfirmar({ titulo: "Importar backup", perigo: true, botao: "Substituir dados",
+          texto: `O backup tem ${d.itens.length} itens, ${d.operadores.length} operadores e ${d.movs.length} movimentações. Ele substitui tudo o que está neste navegador agora. Se quiser guardar os dados atuais, exporte um backup antes.`,
+          acao: () => { setDb(completar(d)); avisar("Backup importado."); } });
+      } catch (_) { avisar("Esse arquivo não é um backup deste sistema (.json exportado aqui).", "bad"); }
+    };
+    fr.readAsText(arq, "utf-8");
+  };
+  const hoje = new Date().toISOString().slice(0, 10);
+  const exportarJson = () => baixar(`backup-almoxarifado-${hoje}.json`, JSON.stringify({ ...db, exportadoEm: agora() }, null, 2));
+  const exportarItens = () => baixar(`estoque-${hoje}.csv`, paraCsv([["SKU", "Item", "Categoria", "Unidade", "Local", "Saldo", "Mínimo", "Status", "Valor unit. (R$)", "Valor total (R$)"],
+    ...db.itens.map((i) => [i.sku, i.nome, i.categoria, i.unidade, i.local, String(i.qtd).replace(".", ","), String(i.minimo).replace(".", ","), statusItem(i), i.valor.toFixed(2).replace(".", ","), (i.qtd * i.valor).toFixed(2).replace(".", ",")])]));
+  const copiar = (t, msg) => navigator.clipboard?.writeText(t).then(() => avisar(msg || "Copiado.")).catch(() => avisar("Não consegui copiar: selecione e use Ctrl+C.", "warn"));
+
+  return html`
+  <section><p class="lbl m-0" style=${{ color: "rgb(var(--accent-ink))" }}>Conexões</p><h2 class="font-display text-3xl font-bold m-0">Integração e backup</h2></section>
+  <div class="grid gap-5 lg:grid-cols-2 items-start">
+    <section class="card overflow-hidden">
+      <div class="px-5 py-4 border-b border-line flex items-start justify-between gap-3"><div><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="ClipboardList" size=${19} /> 1. Perguntas do formulário</h3>
+        <p class="m-0 mt-1 text-sm text-muted">Crie o formulário com estes títulos. O app reconhece as colunas pelo nome (variações como "ID do operador" ou "Qtd" também servem).</p></div>
+        <button class="btn btn-ghost btn-sm shrink-0" onClick=${() => copiar(CAMPOS_FORM.map((c) => c[0]).join("\n"), "Títulos das perguntas copiados.")}><${Ic} n="Copy" size=${14} /> Copiar</button></div>
+      <div class="scroll-x"><table class="grid-t"><thead><tr><th>Pergunta (título exato)</th><th>Tipo</th><th>Exemplo</th></tr></thead>
+        <tbody>${CAMPOS_FORM.map((c) => html`<tr key=${c[0]}><td class="font-semibold">${c[0]}</td><td class="text-sm text-muted">${c[1]}</td><td class="font-mono text-sm">${c[2]}</td></tr>`)}
+        <tr><td class="text-muted">Carimbo de data/hora</td><td class="text-sm text-muted" colspan="2">Criado sozinho pelo Google Forms; evita importar a mesma resposta duas vezes.</td></tr></tbody></table></div>
+      <div class="px-5 py-3 border-t border-line bg-surface2 flex flex-wrap gap-2"><button class="btn btn-ghost" onClick=${() => setInstr(true)}><${Ic} n="Info" size=${16} /> Instruções técnicas (Forms, Tally, Make/Zapier, Apps Script)</button></div>
+    </section>
+
+    <section class="card overflow-hidden">
+      <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="FileSpreadsheet" size=${19} /> 2. Ler respostas da planilha</h3>
+        <p class="m-0 mt-1 text-sm text-muted">O Google Forms (e o Tally, pela integração dele) grava as respostas numa planilha Google. Esta página lê essa planilha pela sua conexão Google Sheets do claude.ai.</p></div>
+      <div class="p-5 flex flex-col gap-3">
+        ${mcp === null ? html`<p class="m-0 text-sm p-3 rounded-lg bg-warn-soft text-warn">A leitura direta não está disponível nesta visualização (fora do claude.ai ou sem a conexão Google Sheets). Use a importação de CSV abaixo.</p>` : null}
+        <${Campo} id="gs-id" rotulo="Link ou ID da planilha de respostas"><input id="gs-id" class="inp font-mono text-sm" value=${cfg.planilha} onInput=${(e) => setCfg({ ...cfg, planilha: e.target.value })} onBlur=${() => salvarCfg(cfg)} placeholder="https://docs.google.com/spreadsheets/d/…" /><//>
+        <${Campo} id="gs-aba" rotulo="Nome da aba" dica='Google Forms cria "Respostas ao formulário 1". Com o Apps Script, use "Requisicoes".'><input id="gs-aba" class="inp" value=${cfg.aba} onInput=${(e) => setCfg({ ...cfg, aba: e.target.value })} onBlur=${() => salvarCfg(cfg)} /><//>
+        <label class="flex items-center gap-2 text-sm font-semibold cursor-pointer"><input type="checkbox" checked=${!!cfg.auto} onChange=${(e) => salvarCfg({ ...cfg, auto: e.target.checked })} disabled=${!mcp} /> Verificar novas respostas a cada 2 minutos enquanto esta página estiver aberta</label>
+        <div class="flex flex-wrap gap-2 items-center"><button class="btn" onClick=${() => { salvarCfg(cfg); buscar(); }} disabled=${estado.lendo || mcp === null}><${Ic} n="RefreshCw" size=${16} className=${estado.lendo ? "animate-spin" : ""} /> Buscar respostas agora</button>
+          ${estado.em ? html`<span class="text-xs text-muted">Última leitura: ${estado.em.toLocaleTimeString("pt-BR")}</span>` : null}</div>
+        ${estado.msg ? html`<p role="status" class=${"m-0 text-sm p-3 rounded-lg " + (estado.tom === "bad" ? "bg-bad-soft text-bad" : estado.tom === "ok" ? "bg-good-soft text-good" : "bg-surface2 text-muted")}>${estado.msg}${estado.tom === "ok" ? html` <button class="underline font-semibold" style=${{ background: "none", border: 0, color: "inherit", cursor: "pointer" }} onClick=${() => irPara("requisicoes")}>Ver requisições</button>` : null}</p>` : null}
+        <div class="border-t border-dashed border-line pt-3 flex flex-col gap-2">
+          <span class="lbl">Ou importe um arquivo</span>
+          <p class="m-0 text-sm text-muted">CSV exportado do Google Forms, Tally, Typeform ou Jotform. Respostas já importadas não entram de novo.</p>
+          <label class="btn btn-ghost w-fit cursor-pointer relative"><${Ic} n="Upload" size=${16} /> Importar respostas (.csv)<input type="file" accept=".csv,text/csv" class="sr-only" style=${{ position: "absolute", width: 1, height: 1, opacity: 0 }} onChange=${(e) => lerArquivo(e, "csv")} /></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card overflow-hidden lg:col-span-2">
+      <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="Database" size=${19} /> 3. Backup dos dados</h3>
+        <p class="m-0 mt-1 text-sm text-muted">Tudo fica salvo neste navegador, neste aparelho. Exporte um backup de vez em quando: limpar os dados do navegador apaga o estoque daqui.</p></div>
+      <div class="p-5 grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))" }}>
+        <button class="btn" onClick=${exportarJson}><${Ic} n="FileJson" size=${16} /> Exportar backup (JSON)</button>
+        <button class="btn btn-ghost" onClick=${exportarItens}><${Ic} n="FileSpreadsheet" size=${16} /> Exportar estoque (CSV)</button>
+        <label class="btn btn-ghost cursor-pointer relative"><${Ic} n="Upload" size=${16} /> Importar backup (JSON)<input type="file" accept=".json,application/json" style=${{ position: "absolute", width: 1, height: 1, opacity: 0 }} onChange=${(e) => lerArquivo(e, "json")} /></label>
+        ${db.exemplo ? html`<button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Começar do zero", perigo: true, botao: "Apagar exemplos",
+            texto: "Apagar os itens, operadores, movimentações e requisições de exemplo para cadastrar os seus? A ligação com a planilha continua.",
+            acao: () => { setDb({ ...completar({ itens: [], operadores: [], movs: [], requisicoes: [] }), integracao: db.integracao }); avisar("Exemplos apagados. Comece cadastrando itens e operadores."); } })}><${Ic} n="Trash2" size=${16} className="text-bad" /> Apagar dados de exemplo</button>`
+          : html`<button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Carregar exemplos", perigo: true, botao: "Substituir pelos exemplos",
+            texto: "Substituir todos os dados deste navegador pelos dados de exemplo? Exporte um backup antes se quiser guardar os atuais.",
+            acao: () => { setDb(exemplos()); avisar("Exemplos carregados."); } })}><${Ic} n="Sparkles" size=${16} /> Carregar dados de exemplo</button>`}
+      </div>
+    </section>
+  </div>
+  ${instr ? html`<${Modal} titulo="Conectar o formulário" onClose=${() => setInstr(false)} largo=${true}>
+    <p class="m-0 text-sm">Esta página não tem um endereço público para receber webhooks. O caminho é sempre o mesmo: <b>o formulário grava numa planilha Google</b> e o app lê a planilha (botão "Buscar respostas" ou verificação a cada 2 minutos). Escolha a ferramenta:</p>
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="p-4 rounded-lg border border-line"><h4 class="font-display text-lg font-bold m-0">Google Forms</h4><ol class="m-0 mt-2 pl-5 text-sm flex flex-col gap-1">
+        <li>Crie as perguntas com os títulos da tabela 1.</li><li>Aba <b>Respostas ▸ Vincular ao Planilhas</b> ▸ criar planilha.</li><li>Copie o link da planilha e cole no campo 2.</li></ol></div>
+      <div class="p-4 rounded-lg border border-line"><h4 class="font-display text-lg font-bold m-0">Tally</h4><ol class="m-0 mt-2 pl-5 text-sm flex flex-col gap-1">
+        <li>Crie o formulário com os mesmos títulos.</li><li><b>Integrations ▸ Google Sheets ▸ Connect</b>.</li><li>Cole o link da planilha criada no campo 2 (aba "Sheet1" ou a que o Tally criar).</li></ol></div>
+      <div class="p-4 rounded-lg border border-line"><h4 class="font-display text-lg font-bold m-0">Typeform, Jotform ou webhook (Make / Zapier)</h4><ol class="m-0 mt-2 pl-5 text-sm flex flex-col gap-1">
+        <li>Gatilho: <b>New submission</b> (ou "Custom webhook" se o seu formulário só envia webhook).</li><li>Ação: <b>Google Sheets ▸ Add row</b>, mapeando cada resposta para as colunas da tabela 1.</li><li>Cole o link dessa planilha no campo 2.</li></ol></div>
+      <div class="p-4 rounded-lg border border-line"><h4 class="font-display text-lg font-bold m-0">Sem internet no meio</h4><ol class="m-0 mt-2 pl-5 text-sm flex flex-col gap-1">
+        <li>Exporte as respostas em CSV na ferramenta do formulário.</li><li>Use <b>Importar respostas (.csv)</b>.</li><li>Repetidas são ignoradas.</li></ol></div>
+    </div>
+    <div class="flex flex-col gap-2"><div class="flex items-center justify-between gap-2"><h4 class="font-display text-lg font-bold m-0">Opcional: Google Apps Script para padronizar as colunas</h4>
+      <button class="btn btn-ghost btn-sm" onClick=${() => copiar(APPS_SCRIPT, "Script copiado.")}><${Ic} n="Copy" size=${14} /> Copiar script</button></div>
+      <pre class="code m-0">${APPS_SCRIPT}</pre>
+      <p class="m-0 text-xs text-muted">Útil quando as perguntas do formulário têm outros títulos: ajuste os nomes dentro de v("…") e aponte o app para a aba "Requisicoes".</p></div>
+  <//>` : null}`;
+}
+
+ReactDOM.createRoot(document.getElementById("app")).render(html`<${App} />`);
+</script>
