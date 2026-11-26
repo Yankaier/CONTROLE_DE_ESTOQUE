@@ -131,54 +131,6 @@ const statusItem = (it) => (it.qtd <= 0 ? "Esgotado" : it.minimo > 0 && it.qtd <
 const CHIP_STATUS = { Normal: "chip-ok", Baixo: "chip-warn", Esgotado: "chip-bad" };
 const isoLocal = (d) => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return z.toISOString().slice(0, 16); };
 
-/* ================= dados de exemplo (da nossa conversa) ================= */
-function exemplos() {
-  const t = (diasAtras, h = 9, m = 0) => { const d = new Date(); d.setDate(d.getDate() - diasAtras); d.setHours(h, m, 0, 0); return d.toISOString(); };
-  const it = (id, sku, nome, categoria, unidade, valor, minimo, local) => ({ id, sku, nome, categoria, unidade, valor, minimo, local, qtd: 0, criadoEm: t(30) });
-  const itens = [
-    it("i1", "CB-06", "CABO DE REDE CAT6", "Rede e cabos", "un", 18.9, 5, "Estante 3 · PT2 · Caixa 12"),
-    it("i2", "LT-01", "LEITOR DE CARTÃO", "Periféricos", "un", 320, 1, "Estante 1 · PT1"),
-    it("i3", "FN-9", "FONTE 12V", "Elétrica", "un", 45, 5, "Estante 5 · PT3"),
-    it("i4", "P001", "CANETA AZUL", "Papelaria", "un", 2.5, 10, "Estante 7 · PT1"),
-    it("i5", "P002", "CADERNO 96 FOLHAS", "Papelaria", "un", 15, 5, "Estante 7 · PT1"),
-    it("i6", "IMP-58", "IMPRESSORA TÉRMICA 58MM", "Periféricos", "un", 410, 2, "Estante 2 · PT1"),
-    it("i7", "NOT-01", "NOTEIRO (VALIDADOR DE CÉDULAS)", "Periféricos", "un", 890, 1, "Estante 2 · PT2"),
-    it("i8", "LAC-100", "LACRE NUMERADO (PACOTE 100)", "Consumo", "pct", 38, 4, "Estante 6 · PT1"),
-    it("i9", "BOB-57", "BOBINA TÉRMICA 57X40", "Consumo", "cx", 96, 3, "Estante 6 · PT2"),
-    it("i10", "CH-T", "CHAVE TUBULAR", "Ferragens", "un", 12.5, 10, "Estante 4 · PT3"),
-  ];
-  const operadores = [
-    { id: "o1", matricula: "OP-001", nome: "LUAN", setor: "Montagem", cargo: "Montador", status: "Ativo", nivel: "Solicitante" },
-    { id: "o2", matricula: "OP-002", nome: "ANA", setor: "Montagem", cargo: "Líder de montagem", status: "Ativo", nivel: "Supervisor" },
-    { id: "o3", matricula: "OP-003", nome: "MARIA", setor: "Manutenção", cargo: "Técnica", status: "Ativo", nivel: "Solicitante" },
-    { id: "o4", matricula: "OP-004", nome: "JOÃO", setor: "Almoxarifado", cargo: "Almoxarife", status: "Ativo", nivel: "Gestor" },
-    { id: "o5", matricula: "OP-090", nome: "OPERADOR TEMPORÁRIO", setor: "OPERADOR", cargo: "Contrato encerrado", status: "Inativo", nivel: "Solicitante" },
-  ];
-  const db = { versao: 1, exemplo: true, itens, operadores, movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false } };
-  const op = (id) => operadores.find((o) => o.id === id);
-  const mov = (tipo, itemId, qtd, extra) => aplicarMov(db, { tipo, itemId, qtd, origem: "Manual", ...extra }, true);
-  mov("Entrada", "i1", 10, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
-  mov("Saída", "i1", 6, { dataHora: t(12, 10, 15), destino: "Montagem", operador: op("o1"), os: "0042/26" });
-  mov("Entrada", "i2", 3, { dataHora: t(18), nf: "123", obs: "Fornecedor X" });
-  mov("Saída", "i2", 1, { dataHora: t(3, 14, 5), destino: "Montagem", operador: op("o1"), obs: "Serial 818EZ001" });
-  mov("Entrada", "i3", 20, { dataHora: t(15), nf: "4471" });
-  mov("Entrada", "i4", 50, { dataHora: t(25), obs: "Compra fornecedor" });
-  mov("Saída", "i4", 45, { dataHora: t(9, 11, 30), destino: "Sala 3", operador: op("o2") });
-  mov("Entrada", "i5", 4, { dataHora: t(25) });
-  mov("Saída", "i5", 4, { dataHora: t(2, 8, 40), destino: "Manutenção", operador: op("o3") });
-  mov("Entrada", "i6", 3, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
-  mov("Entrada", "i7", 1, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
-  mov("Entrada", "i8", 12, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
-  mov("Entrada", "i9", 6, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
-  mov("Entrada", "i10", 25, { dataHora: t(20), obs: "Saldo inicial", origem: "Cadastro" });
-  mov("Saída", "i10", 3, { dataHora: t(1, 16, 20), destino: "Manutenção", operador: op("o4"), obs: "Troca de fechaduras" });
-  const amanha = new Date(); amanha.setDate(amanha.getDate() + 1); amanha.setHours(8, 0, 0, 0);
-  const req = (matricula, item, qtd, destino, obs) => ({ matricula, item, qtd, destino, obs, previsto: isoLocal(amanha), fonte: "Formulário (exemplo)" });
-  [req("OP-002", "IMP-58", 2, "Montagem", "Terminais da linha 2"), req("OP-003", "FONTE 12V", 3, "Manutenção", ""), req("OP-099", "CB-06", 2, "Obra Centro", "Matrícula não cadastrada")]
-    .forEach((r) => novaRequisicao(db, r));
-  return db;
-}
-
 /* ================= regras de negócio ================= */
 function aplicarMov(db, d, semValidar) {
   const it = db.itens.find((x) => x.id === d.itemId);
@@ -198,7 +150,7 @@ function aplicarMov(db, d, semValidar) {
   }
   const delta = d.tipo === "Saída" ? -q : q;
   it.qtd = Math.round((it.qtd + delta) * 1000) / 1000;
-  db.seq.mov += 1;
+  db.seq.mov = Math.max(db.seq.mov || 0, ...db.movs.map((x) => x.n || 0)) + 1;
   const m = {
     id: uid("m"), n: db.seq.mov, tipo: d.tipo, itemId: it.id, sku: it.sku, nome: it.nome, unidade: it.unidade,
     qtd: d.tipo === "Ajuste" ? q : Math.abs(q), valorUnit: it.valor, valorTotal: Math.abs(q) * it.valor,
@@ -211,7 +163,7 @@ function aplicarMov(db, d, semValidar) {
 }
 
 function novaRequisicao(db, r) {
-  db.seq.req += 1;
+  db.seq.req = Math.max(db.seq.req || 0, ...db.requisicoes.map((x) => parseInt(String(x.num).replace(/\D/g, ""), 10) || 0)) + 1;
   const q = { id: uid("r"), num: "R-" + String(db.seq.req).padStart(4, "0"), recebidaEm: r.recebidaEm || agora(), matricula: String(r.matricula || "").trim(),
     item: String(r.item || "").trim(), itemId: "", qtd: num(r.qtd), previsto: r.previsto || "", destino: String(r.destino || "").trim(), obs: String(r.obs || "").trim(),
     fonte: r.fonte || "Formulário", chave: r.chave || "", status: "Pendente", motivo: "", movId: "", decididoEm: "" };
@@ -242,20 +194,48 @@ function checarRequisicao(db, r) {
   return { op, it, checks, ok: checks.every((c) => c.ok) };
 }
 
-/* ================= persistência (localStorage, como pedido) ================= */
-function carregar() {
-  try {
-    const raw = localStorage.getItem(CHAVE);
-    if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.itens) && Array.isArray(d.movs)) return { db: completar(d), armazenamento: true }; }
-  } catch (_) { return { db: exemplos(), armazenamento: false }; }
-  return { db: exemplos(), armazenamento: true };
+/* ================= persistência =================
+   No claude.ai: o banco de dados deste app (o mesmo no celular e no notebook).
+   Aberto fora do claude.ai: fica salvo só no navegador. */
+const COLS = ["itens", "operadores", "movs", "requisicoes"];
+const porNome = (a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR");
+const ORDEM = { itens: porNome, operadores: porNome, movs: (a, b) => (a.n || 0) - (b.n || 0), requisicoes: (a, b) => String(a.num).localeCompare(String(b.num)) };
+function vazio() {
+  return { itens: [], operadores: [], movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false }, importacao: null };
 }
 function completar(d) {
-  return { versao: 1, exemplo: !!d.exemplo, itens: d.itens || [], operadores: d.operadores || [], movs: d.movs || [], requisicoes: d.requisicoes || [],
+  const v = vazio();
+  return { itens: d.itens || [], operadores: d.operadores || [], movs: d.movs || [], requisicoes: d.requisicoes || [],
     seq: { mov: d.seq?.mov || (d.movs || []).length, req: d.seq?.req || (d.requisicoes || []).length },
-    integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false, ...(d.integracao || {}) } };
+    integracao: { ...v.integracao, ...(d.integracao || {}) }, importacao: d.importacao || null };
 }
-function salvar(db) { try { localStorage.setItem(CHAVE, JSON.stringify(db)); return true; } catch (_) { return false; } }
+function carregarLocal() {
+  try { const raw = localStorage.getItem(CHAVE); if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.itens) && !d.exemplo) return completar(d); } } catch (_) {}
+  return vazio();
+}
+function salvarLocal(db) { try { localStorage.setItem(CHAVE, JSON.stringify(db)); return true; } catch (_) { return false; } }
+const configDoc = (d) => ({ seq: d.seq, integracao: d.integracao, importacao: d.importacao || null });
+const semId = (o) => { const { id, ...r } = o; return r; };
+/* grava no banco só o que mudou entre dois estados */
+async function gravarDiferencas(banco, antes, depois) {
+  const tarefas = [];
+  for (const col of COLS) {
+    const a = new Map(antes[col].map((x) => [x.id, x]));
+    const d = new Map(depois[col].map((x) => [x.id, x]));
+    for (const [id, x] of d) { const v = a.get(id); if (!v || JSON.stringify(v) !== JSON.stringify(x)) tarefas.push(() => banco.collection(col).doc(id).set(semId(x))); }
+    for (const id of a.keys()) if (!d.has(id)) tarefas.push(() => banco.collection(col).doc(id).delete());
+  }
+  if (JSON.stringify(configDoc(antes)) !== JSON.stringify(configDoc(depois))) tarefas.push(() => banco.doc("config/geral").set(configDoc(depois)));
+  for (let k = 0; k < tarefas.length; k += 20) await Promise.all(tarefas.slice(k, k + 20).map((t) => t()));
+  return tarefas.length;
+}
+function erroBanco(e) {
+  const c = e && e.code;
+  if (c === "invalid_argument") return "Você não tem permissão para alterar estes dados (peça acesso de Colaborador ao dono).";
+  if (c === "quota_exceeded") return "O banco de dados chegou ao limite. Exporte um backup e apague movimentações antigas.";
+  if (c === "resource_exhausted") return "Muitas gravações ao mesmo tempo. Espere alguns segundos e tente de novo.";
+  return "Não consegui salvar no banco agora. Confira a internet e tente de novo.";
+}
 
 /* ================= CSV ================= */
 function csvLinhas(texto) {
@@ -347,10 +327,12 @@ function Kpi({ icone, valor, rotulo, tom, onClick, sub }) {
 
 /* ================= app ================= */
 function App() {
-  const ini = useMemo(carregar, []);
-  const [db, setDb] = useState(ini.db);
-  const dbRef = useRef(ini.db);
-  const [armazenamento, setArmazenamento] = useState(ini.armazenamento);
+  const [db, setDb] = useState(vazio);
+  const dbRef = useRef(db);
+  const banco = useRef(null);
+  const [modo, setModo] = useState("conectando");   // conectando | nuvem | lento | local | erro
+  const [carregado, setCarregado] = useState(false);
+  const [armazenamento, setArmazenamento] = useState(true);
   const [aba, setAba] = useState(() => (["estoque", "movimentar", "historico", "requisicoes", "operadores", "integracao"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "estoque"));
   const [toasts, setToasts] = useState([]);
   const [confirmar, setConfirmar] = useState(null);
@@ -359,13 +341,39 @@ function App() {
   const [textoSaida, setTextoSaida] = useState(null);
   const [preMov, setPreMov] = useState(null);
 
-  useEffect(() => { const ok = salvar(db); setArmazenamento(ok); }, [db]);
+  /* liga no banco de dados uma vez; sem banco (fora do claude.ai), usa o navegador */
+  useEffect(() => {
+    const fim = []; let timer;
+    usar("db").then((b) => {
+      if (!b) { const d = carregarLocal(); dbRef.current = d; setDb(d); setModo("local"); setCarregado(true); return; }
+      banco.current = b;
+      try { localStorage.removeItem(CHAVE); } catch (_) {}
+      const prontos = new Set();
+      timer = setTimeout(() => { if (prontos.size < COLS.length + 1) { setModo("lento"); setCarregado(true); } }, 10000);
+      const pronto = (k, snap) => { if (!snap.metadata.fromCache) prontos.add(k); if (prontos.size >= COLS.length + 1) { clearTimeout(timer); setModo("nuvem"); setCarregado(true); } };
+      const erro = () => { clearTimeout(timer); setModo("erro"); setCarregado(true); };
+      COLS.forEach((col) => fim.push(b.collection(col).onSnapshot((snap) => {
+        dbRef.current = { ...dbRef.current, [col]: snap.docs.map((d) => ({ ...d.data(), id: d.id })).sort(ORDEM[col]) };
+        setDb(dbRef.current); pronto(col, snap);
+      }, erro)));
+      fim.push(b.doc("config/geral").onSnapshot((snap) => {
+        const c = snap.exists ? snap.data() : {};
+        dbRef.current = { ...dbRef.current, seq: { mov: 0, req: 0, ...(c.seq || {}) }, integracao: { ...vazio().integracao, ...(c.integracao || {}) }, importacao: c.importacao || null };
+        setDb(dbRef.current); pronto("config", snap);
+      }, erro));
+    });
+    return () => { clearTimeout(timer); fim.forEach((f) => f()); };
+  }, []);
   useEffect(() => { const f = () => { const h = location.hash.slice(1); if (h) setAba(h); }; window.addEventListener("hashchange", f); return () => window.removeEventListener("hashchange", f); }, []);
   useEffect(() => { usar("downloads").then(setDownloads); usar("mcp").then((m) => setMcp(m || null)); }, []);
 
   const irPara = (a) => { setAba(a); try { history.replaceState(null, "", "#" + a); } catch (_) { location.hash = a; } window.scrollTo({ top: 0, behavior: "smooth" }); };
   const avisar = useCallback((texto, tom = "ok") => { const id = uid("t"); setToasts((t) => [...t, { id, texto, tom }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4800); }, []);
-  const substituir = useCallback((novo) => { dbRef.current = novo; setDb(novo); }, []);
+  const substituir = useCallback((novo) => {
+    const antes = dbRef.current; dbRef.current = novo; setDb(novo);
+    if (banco.current) gravarDiferencas(banco.current, antes, novo).catch((e) => avisar(erroBanco(e), "bad"));
+    else setArmazenamento(salvarLocal(novo));
+  }, [avisar]);
   /* toda mudança passa por aqui: copia o estado atual, aplica e só grava se não deu erro */
   const mudar = useCallback((fn, msg) => {
     const c = JSON.parse(JSON.stringify(dbRef.current));
@@ -375,6 +383,7 @@ function App() {
     if (msg) avisar(typeof msg === "function" ? msg(ret) : msg);
     return true;
   }, [avisar, substituir]);
+  const mudarRef = useRef(mudar); mudarRef.current = mudar;
 
   const baixar = async (nome, conteudo) => {
     if (downloads) {
@@ -395,7 +404,7 @@ function App() {
   const destinos = useMemo(() => [...new Set([...DESTINOS_BASE, ...db.movs.map((m) => m.destino).filter(Boolean), ...db.requisicoes.map((r) => r.destino).filter(Boolean)])], [db]);
   const ABAS = [["estoque", "Estoque", "Boxes"], ["movimentar", "Movimentar", "ArrowUpDown"], ["historico", "Histórico", "History"],
     ["requisicoes", "Requisições", "ClipboardList", kpi.pend], ["operadores", "Operadores", "UserCheck"], ["integracao", "Integração e backup", "PlugZap"]];
-  const ctx = { db, mudar, avisar, irPara, setConfirmar, baixar, destinos, mcp, downloads, setPreMov, preMov };
+  const ctx = { db, mudar, avisar, irPara, setConfirmar, baixar, destinos, mcp, downloads, setPreMov, preMov, modo };
 
   return html`
   <header class="gutter relative overflow-hidden" style=${{ background: "rgb(var(--band))", color: "rgb(var(--band-ink))", marginTop: "calc(-1 * env(safe-area-inset-top, 0px))", paddingTop: "calc(env(safe-area-inset-top, 0px) + 22px)", paddingBottom: "22px" }}>
@@ -408,9 +417,12 @@ function App() {
           <p class="m-0 mt-1 text-sm" style=${{ color: "rgb(var(--band-muted))" }}>Estoque, entradas e saídas com destino e operador, e requisições vindas do formulário.</p></div>
         </div>
         <div class="flex flex-wrap gap-2 items-center">
-          ${db.exemplo ? html`<span class="chip chip-warn" title="Itens, operadores e movimentos de exemplo, tirados da nossa conversa">Dados de exemplo</span>` : null}
-          <span class=${"chip " + (armazenamento ? "chip-ok" : "chip-bad")} title=${armazenamento ? "Tudo fica salvo neste navegador" : "Este navegador não está guardando os dados: exporte um backup"}>
-            <${Ic} n=${armazenamento ? "Database" : "TriangleAlert"} size=${12} /> ${armazenamento ? "Salvo neste navegador" : "Sem salvamento"}</span>
+          ${(() => { const st = { nuvem: ["chip-ok", "Database", "Banco de dados na nuvem", "Salvo no banco deste app: o mesmo no celular e no notebook"],
+              conectando: ["chip-plain", "RefreshCw", "Conectando ao banco…", "Buscando os dados"],
+              lento: ["chip-warn", "TriangleAlert", "Banco sem resposta", "Os dados podem estar desatualizados; confira a internet"],
+              erro: ["chip-bad", "CircleX", "Banco indisponível", "Recarregue a página"],
+              local: armazenamento ? ["chip-warn", "TriangleAlert", "Salvo só neste navegador", "Aberto fora do claude.ai: os dados ficam só neste navegador"] : ["chip-bad", "TriangleAlert", "Sem salvamento", "Este navegador não está guardando os dados: exporte um backup"] }[modo];
+            return html`<span class=${"chip " + st[0]} title=${st[3]}><${Ic} n=${st[1]} size=${12} /> ${st[2]}</span>`; })()}
         </div>
       </div>
       <div class="grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))" }}>
@@ -429,12 +441,13 @@ function App() {
   </nav>
   <main class="gutter" style=${{ paddingBlock: "24px 56px" }}>
     <div class="max-w-7xl mx-auto flex flex-col gap-5">
-      ${aba === "estoque" ? html`<${Estoque} ...${ctx} />` : null}
-      ${aba === "movimentar" ? html`<${Movimentar} ...${ctx} />` : null}
-      ${aba === "historico" ? html`<${Historico} ...${ctx} />` : null}
-      ${aba === "requisicoes" ? html`<${Requisicoes} ...${ctx} />` : null}
-      ${aba === "operadores" ? html`<${Operadores} ...${ctx} />` : null}
-      ${aba === "integracao" ? html`<${Integracao} ...${ctx} setDb=${substituir} />` : null}
+      ${!carregado ? html`<div class="card"><${Vazio} icone="Database" texto="Carregando o estoque do banco de dados…" /></div>` : null}
+      ${carregado && aba === "estoque" ? html`<${Estoque} ...${ctx} />` : null}
+      ${carregado && aba === "movimentar" ? html`<${Movimentar} ...${ctx} />` : null}
+      ${carregado && aba === "historico" ? html`<${Historico} ...${ctx} />` : null}
+      ${carregado && aba === "requisicoes" ? html`<${Requisicoes} ...${ctx} />` : null}
+      ${carregado && aba === "operadores" ? html`<${Operadores} ...${ctx} />` : null}
+      ${carregado && aba === "integracao" ? html`<${Integracao} ...${ctx} setDb=${substituir} />` : null}
     </div>
   </main>
   ${confirmar ? html`<${Modal} titulo=${confirmar.titulo} onClose=${() => setConfirmar(null)}>
@@ -461,7 +474,8 @@ function Estoque({ db, mudar, setConfirmar, irPara, setPreMov }) {
   const cats = useMemo(() => [...new Set(db.itens.map((i) => i.categoria).filter(Boolean))].sort(), [db.itens]);
   const lista = useMemo(() => {
     const t = norm(busca);
-    let l = db.itens.filter((i) => (!t || norm(i.nome).includes(t) || norm(i.sku).includes(t) || norm(i.local).includes(t)) && (!cat || i.categoria === cat) && (!st || statusItem(i) === st));
+    let l = db.itens.filter((i) => (!t || norm(i.nome).includes(t) || norm(i.sku).includes(t) || norm(i.local).includes(t) || (i.seriais || []).some((x) => norm(x).includes(t)))
+      && (!cat || i.categoria === cat) && (!st || (st === "SemValor" ? !(i.valor > 0) : statusItem(i) === st)));
     const f = { nome: (a, b) => a.nome.localeCompare(b.nome, "pt-BR"), qtd_asc: (a, b) => a.qtd - b.qtd, qtd_desc: (a, b) => b.qtd - a.qtd,
       total_desc: (a, b) => b.qtd * b.valor - a.qtd * a.valor, total_asc: (a, b) => a.qtd * a.valor - b.qtd * b.valor, unit_desc: (a, b) => b.valor - a.valor };
     return l.sort(f[ordem]);
@@ -471,6 +485,7 @@ function Estoque({ db, mudar, setConfirmar, irPara, setPreMov }) {
     texto: `Excluir ${it.nome} (${it.sku})? O histórico de movimentações dele continua guardado.`,
     acao: () => mudar((d) => { d.itens = d.itens.filter((x) => x.id !== it.id); }, `${it.nome} excluído.`) });
   const contagem = (s) => db.itens.filter((i) => statusItem(i) === s).length;
+  const semValor = db.itens.filter((i) => !(i.valor > 0)).length;
 
   return html`
   <section class="flex flex-wrap items-end justify-between gap-3">
@@ -484,18 +499,19 @@ function Estoque({ db, mudar, setConfirmar, irPara, setPreMov }) {
         <input id="f-busca" class="inp" style=${{ paddingLeft: 34 }} type="search" placeholder="Nome, SKU/código ou local" value=${busca} onInput=${(e) => setBusca(e.target.value)} /></div></div>
       <${Campo} id="f-cat" rotulo="Categoria"><select id="f-cat" class="inp" value=${cat} onChange=${(e) => setCat(e.target.value)}><option value="">Todas</option>${cats.map((c) => html`<option key=${c}>${c}</option>`)}</select><//>
       <${Campo} id="f-st" rotulo="Status"><select id="f-st" class="inp" value=${st} onChange=${(e) => setSt(e.target.value)}>
-        <option value="">Todos</option><option value="Normal">Normal (${contagem("Normal")})</option><option value="Baixo">Estoque baixo (${contagem("Baixo")})</option><option value="Esgotado">Esgotado (${contagem("Esgotado")})</option></select><//>
+        <option value="">Todos</option><option value="Normal">Normal (${contagem("Normal")})</option><option value="Baixo">Estoque baixo (${contagem("Baixo")})</option><option value="Esgotado">Esgotado (${contagem("Esgotado")})</option><option value="SemValor">Sem valor unitário (${semValor})</option></select><//>
       <${Campo} id="f-ord" rotulo="Ordenar por"><select id="f-ord" class="inp" value=${ordem} onChange=${(e) => setOrdem(e.target.value)}>
         <option value="nome">Nome (A–Z)</option><option value="total_desc">Maior valor total</option><option value="total_asc">Menor valor total</option>
         <option value="qtd_desc">Maior quantidade</option><option value="qtd_asc">Menor quantidade</option><option value="unit_desc">Maior valor unitário</option></select><//>
     </div>
-    <p class="m-0 text-sm text-muted">${lista.length} de ${db.itens.length} itens · valor desta seleção: <b class="num text-ink">${brl(totalFiltro)}</b></p>
+    <p class="m-0 text-sm text-muted">${lista.length} de ${db.itens.length} itens · valor desta seleção: <b class="num text-ink">${brl(totalFiltro)}</b>
+      ${semValor ? html` · <button class="underline font-semibold text-warn" style=${{ background: "none", border: 0, padding: 0, cursor: "pointer" }} onClick=${() => setSt("SemValor")}>${semValor} item(ns) sem valor unitário</button>` : null}</p>
   </section>
   <section class="card overflow-hidden">
     ${lista.length ? html`<div class="scroll-x"><table class="grid-t">
       <thead><tr><th>Item</th><th>Categoria</th><th class="r">Saldo</th><th class="r">Mínimo</th><th class="r">Valor unit.</th><th class="r">Valor total</th><th>Status</th><th></th></tr></thead>
       <tbody>${lista.map((i) => { const s = statusItem(i); return html`<tr key=${i.id}>
-        <td><div class="font-semibold">${i.nome}</div><div class="text-xs text-muted"><span class="font-mono">${i.sku}</span>${i.local ? " · " + i.local : ""}</div></td>
+        <td><div class="font-semibold">${i.nome}</div><div class="text-xs text-muted"><span class="font-mono">${i.sku}</span>${i.local ? " · " + i.local : ""}${(i.seriais || []).length ? ` · ${i.seriais.length} serial(is)` : ""}</div></td>
         <td class="text-sm">${i.categoria}</td>
         <td class="r num font-semibold">${qtdFmt(i.qtd)} <span class="text-muted font-normal">${i.unidade}</span></td>
         <td class="r num text-muted">${qtdFmt(i.minimo)}</td>
@@ -521,7 +537,7 @@ function ItemForm({ item, db, mudar, fechar, cats }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const v = { valor: num(f.valor), minimo: num(f.minimo), qtd: num(f.qtd) };
   const skuRepetido = f.sku.trim() && db.itens.some((i) => i.id !== item.id && norm(i.sku) === norm(f.sku));
-  const erros = { nome: !f.nome.trim() && "Informe o nome.", sku: !f.sku.trim() ? "Informe o SKU/código." : skuRepetido && "Já existe um item com esse código.",
+  const erros = { nome: !f.nome.trim() && "Informe o nome.", sku: !f.sku.trim() && "Informe o SKU/código.",
     valor: !(v.valor >= 0) && "Informe um valor (ex.: 18,90).", minimo: !(v.minimo >= 0) && "Use 0 ou mais.",
     qtd: novo ? !(v.qtd >= 0) && "Use 0 ou mais." : f.qtd !== "" && !(v.qtd >= 0) && "Use 0 ou mais." };
   const ok = !Object.values(erros).some(Boolean);
@@ -532,7 +548,7 @@ function ItemForm({ item, db, mudar, fechar, cats }) {
     const feito = mudar((d) => {
       if (novo) {
         const it = { id: uid("i"), ...dados, qtd: 0, criadoEm: agora() };
-        d.itens.push(it); d.exemplo = d.exemplo && true;
+        d.itens.push(it);
         if (v.qtd > 0) aplicarMov(d, { tipo: "Entrada", itemId: it.id, qtd: v.qtd, origem: "Cadastro", obs: "Saldo inicial" });
       } else {
         const it = d.itens.find((x) => x.id === item.id); Object.assign(it, dados);
@@ -548,7 +564,7 @@ function ItemForm({ item, db, mudar, fechar, cats }) {
     <form class="flex flex-col gap-4" onSubmit=${enviar} noValidate>
       <${Campo} id="it-nome" rotulo="Nome do item" erro=${f.nome && erros.nome}><input id="it-nome" class="inp" value=${f.nome} onInput=${set("nome")} placeholder="CABO DE REDE CAT6" autoFocus /><//>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <${Campo} id="it-sku" rotulo="SKU / código" erro=${f.sku && erros.sku}><input id="it-sku" class="inp font-mono" aria-invalid=${!!(f.sku && erros.sku)} value=${f.sku} onInput=${set("sku")} placeholder="CB-06" /><//>
+        <${Campo} id="it-sku" rotulo="SKU / código" erro=${f.sku && erros.sku} dica=${skuRepetido ? "Outro item já usa esse código (pode ser o mesmo produto em outra caixa)." : null}><input id="it-sku" class="inp font-mono" aria-invalid=${!!(f.sku && erros.sku)} value=${f.sku} onInput=${set("sku")} placeholder="CB-06" /><//>
         <${Campo} id="it-cat" rotulo="Categoria"><input id="it-cat" class="inp" list="lista-cats" value=${f.categoria} onInput=${set("categoria")} placeholder="Rede e cabos" /><datalist id="lista-cats">${cats.map((c) => html`<option key=${c} value=${c} />`)}</datalist><//>
         <${Campo} id="it-un" rotulo="Unidade de medida"><select id="it-un" class="inp" value=${f.unidade} onChange=${set("unidade")}>${UNIDADES.map((u) => html`<option key=${u}>${u}</option>`)}</select><//>
         <${Campo} id="it-local" rotulo="Local (estante · PT · caixa)"><input id="it-local" class="inp" value=${f.local} onInput=${set("local")} placeholder="Estante 3 · PT2 · Caixa 12" /><//>
@@ -855,7 +871,7 @@ function aoEnviarFormulario(e) {
     v("Quantidade"), v("Data e hora prevista para retirada"), v("Destino"), v("Observação")]);
 }`;
 
-function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPara }) {
+function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPara, modo }) {
   const [cfg, setCfg] = useState(db.integracao);
   const [estado, setEstado] = useState({ lendo: false, msg: "", tom: "", em: null });
   const [instr, setInstr] = useState(false);
@@ -866,7 +882,7 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
     const { regs, faltando } = linhasParaRequisicoes(linhas, fonte);
     if (faltando.length) { setEstado((s) => ({ ...s, lendo: false, tom: "bad", msg: `Não achei as colunas: ${faltando.join(", ")}. Confira os títulos das perguntas.` })); return; }
     let novas = 0;
-    mudar((d) => { const ja = new Set(d.requisicoes.map((r) => r.chave).filter(Boolean)); regs.forEach((r) => { if (!ja.has(r.chave)) { novaRequisicao(d, r); ja.add(r.chave); novas++; } }); d.exemplo = d.exemplo; });
+    mudar((d) => { const ja = new Set(d.requisicoes.map((r) => r.chave).filter(Boolean)); regs.forEach((r) => { if (!ja.has(r.chave)) { novaRequisicao(d, r); ja.add(r.chave); novas++; } }); });
     setEstado((s) => ({ ...s, lendo: false, tom: "ok", msg: `${regs.length} resposta(s) lida(s); ${novas} nova(s) requisição(ões).` }));
     if (novas) avisar(`${novas} requisição(ões) nova(s) do formulário.`);
   }, [mudar, avisar]);
@@ -916,7 +932,7 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
         const d = JSON.parse(texto);
         if (!d || !Array.isArray(d.itens) || !Array.isArray(d.movs) || !Array.isArray(d.operadores)) throw new Error();
         setConfirmar({ titulo: "Importar backup", perigo: true, botao: "Substituir dados",
-          texto: `O backup tem ${d.itens.length} itens, ${d.operadores.length} operadores e ${d.movs.length} movimentações. Ele substitui tudo o que está neste navegador agora. Se quiser guardar os dados atuais, exporte um backup antes.`,
+          texto: `O backup tem ${d.itens.length} itens, ${d.operadores.length} operadores e ${d.movs.length} movimentações. Ele substitui todos os dados atuais. Se quiser guardar os dados atuais, exporte um backup antes.`,
           acao: () => { setDb(completar(d)); avisar("Backup importado."); } });
       } catch (_) { avisar("Esse arquivo não é um backup deste sistema (.json exportado aqui).", "bad"); }
     };
@@ -961,18 +977,20 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
     </section>
 
     <section class="card overflow-hidden lg:col-span-2">
-      <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="Database" size=${19} /> 3. Backup dos dados</h3>
-        <p class="m-0 mt-1 text-sm text-muted">Tudo fica salvo neste navegador, neste aparelho. Exporte um backup de vez em quando: limpar os dados do navegador apaga o estoque daqui.</p></div>
+      <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="Database" size=${19} /> 3. Banco de dados e backup</h3>
+        <p class="m-0 mt-1 text-sm text-muted">${modo === "local"
+          ? "Aberto fora do claude.ai: os dados ficam só neste navegador. Exporte um backup de vez em quando."
+          : "Os dados ficam no banco deste app, no claude.ai: os mesmos no celular e no notebook, para quem tiver acesso ao link. Exporte um backup de vez em quando."}</p></div>
+      ${db.importacao ? html`<div class="mx-5 mt-4 p-3 rounded-lg bg-info-soft text-info text-sm flex gap-2 items-start"><${Ic} n="ClipboardList" size=${16} className="mt-0.5 shrink-0" />
+        <span>Copiados do formulário <b>${db.importacao.origem}</b> em ${dataHora(db.importacao.em)}: ${db.importacao.itens} itens, ${db.importacao.operadores} operadores e ${db.importacao.movs} movimentações.
+        Para trazer o que foi lançado lá depois disso, peça ao Claude: <i>"atualize a Gestão com os dados do formulário"</i>.</span></div>` : null}
       <div class="p-5 grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))" }}>
         <button class="btn" onClick=${exportarJson}><${Ic} n="FileJson" size=${16} /> Exportar backup (JSON)</button>
         <button class="btn btn-ghost" onClick=${exportarItens}><${Ic} n="FileSpreadsheet" size=${16} /> Exportar estoque (CSV)</button>
         <label class="btn btn-ghost cursor-pointer relative"><${Ic} n="Upload" size=${16} /> Importar backup (JSON)<input type="file" accept=".json,application/json" style=${{ position: "absolute", width: 1, height: 1, opacity: 0 }} onChange=${(e) => lerArquivo(e, "json")} /></label>
-        ${db.exemplo ? html`<button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Começar do zero", perigo: true, botao: "Apagar exemplos",
-            texto: "Apagar os itens, operadores, movimentações e requisições de exemplo para cadastrar os seus? A ligação com a planilha continua.",
-            acao: () => { setDb({ ...completar({ itens: [], operadores: [], movs: [], requisicoes: [] }), integracao: db.integracao }); avisar("Exemplos apagados. Comece cadastrando itens e operadores."); } })}><${Ic} n="Trash2" size=${16} className="text-bad" /> Apagar dados de exemplo</button>`
-          : html`<button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Carregar exemplos", perigo: true, botao: "Substituir pelos exemplos",
-            texto: "Substituir todos os dados deste navegador pelos dados de exemplo? Exporte um backup antes se quiser guardar os atuais.",
-            acao: () => { setDb(exemplos()); avisar("Exemplos carregados."); } })}><${Ic} n="Sparkles" size=${16} /> Carregar dados de exemplo</button>`}
+        <button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Apagar todos os dados", perigo: true, botao: "Apagar tudo",
+            texto: `Apagar ${db.itens.length} itens, ${db.operadores.length} operadores, ${db.movs.length} movimentações e ${db.requisicoes.length} requisições${modo === "local" ? " deste navegador" : " do banco de dados, em todos os aparelhos"}? Exporte um backup antes se quiser guardar.`,
+            acao: () => { setDb({ ...vazio(), integracao: db.integracao }); avisar("Todos os dados foram apagados."); } })}><${Ic} n="Trash2" size=${16} className="text-bad" /> Apagar todos os dados</button>
       </div>
     </section>
   </div>
