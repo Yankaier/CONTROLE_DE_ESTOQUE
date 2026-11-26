@@ -1,9 +1,10 @@
 """Converte os dados do app Movimentação do Almoxarifado (formulário) para o banco da Gestão do Almoxarifado.
 
-Uso: python copiar_do_formulario.py <pasta com itens/ pessoas/ lancamentos/ em JSON> <pasta de saída>
+Uso: GESTORES="NOME A,NOME B" python copiar_do_formulario.py <pasta com itens/ pessoas/ lancamentos/ em JSON> <pasta de saída>
 Gera um JSON por documento e _lotes.json com lotes de 50 gravações (itens, operadores, movs, config/geral)."""
 import json, glob, sys, os, re, unicodedata, collections, datetime
 ORIG, OUT = sys.argv[1], sys.argv[2]
+GESTORES = {s.strip().upper() for s in os.environ.get('GESTORES', '').split(',') if s.strip()}  # nomes (separados por vírgula) que viram Gestor
 load = lambda c: {f.split('/')[-1][:-5]: json.load(open(f)) for f in glob.glob(f"{ORIG}/{c}/*.json")}
 itens, lancs, pessoas = load('itens'), load('lancamentos'), load('pessoas')
 norm = lambda s: unicodedata.normalize('NFD', str(s or '')).encode('ascii', 'ignore').decode().upper().strip()
@@ -26,7 +27,7 @@ ops = {}
 for n, (pid, p) in enumerate(sorted(pessoas.items(), key=lambda kv: norm(kv[1].get('nome'))), start=1):
     nome = re.sub(r'\s+', ' ', txt(p.get('nome')).upper())
     o = {'matricula': f'OP-{n:03d}', 'nome': nome, 'setor': SETOR.get(norm(p.get('area')), txt(p.get('area')).title()), 'cargo': '',
-         'status': 'Ativo', 'nivel': 'Gestor' if norm(nome) == 'LUIS ESTOQUE' else 'Solicitante', 'origem': 'Formulário'}
+         'status': 'Ativo', 'nivel': 'Gestor' if norm(nome) in GESTORES else 'Solicitante', 'origem': 'Formulário'}
     ops[norm(nome)] = (pid, o); docs.append(('operadores', pid, o))
 SISTEMA = {'CARGA INICIAL', 'CONTAGEM FISICA', 'TRANSFERENCIA INTERNA', 'INVENTARIO', '-', ''}
 # itens
