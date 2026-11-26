@@ -106,6 +106,830 @@ pre.code { font-family: var(--f-mono); font-size: .78rem; line-height: 1.55; bac
 <div id="app"><p class="gutter" style="padding-block: 40px; color: rgb(var(--muted))">Carregando o almoxarifado…</p></div>
 
 <script>
+/* Edição do .xlsx no navegador: mesmo módulo do app Movimentação do Almoxarifado (acrescenta linhas sem regravar o resto do arquivo) */
+const XLSX_EDIT = (() => {
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(u8) {
+    let c = 0xffffffff;
+    for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  async function pipe(u8, stream) {
+    const buf = await new Response(new Blob([u8]).stream().pipeThrough(stream)).arrayBuffer();
+    return new Uint8Array(buf);
+  }
+  const inflate = (u8) => pipe(u8, new DecompressionStream('deflate-raw'));
+  const deflate = (u8) => pipe(u8, new CompressionStream('deflate-raw'));
+
+  function readZip(u8) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('Arquivo .xlsx inválido (fim do zip não encontrado)');
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const dec = new TextDecoder();
+    const entries = [];
+    for (let i = 0; i < count; i++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('Diretório do zip corrompido');
+      const e = {
+        versionMade: dv.getUint16(p + 4, true),
+        version: dv.getUint16(p + 6, true),
+        flags: dv.getUint16(p + 8, true) & ~0x0008,
+        method: dv.getUint16(p + 10, true),
+        time: dv.getUint16(p + 12, true),
+        date: dv.getUint16(p + 14, true),
+        crc: dv.getUint32(p + 16, true),
+        csize: dv.getUint32(p + 20, true),
+        usize: dv.getUint32(p + 24, true),
+      };
+      const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+      const lho = dv.getUint32(p + 42, true);
+      e.nameBytes = u8.slice(p + 46, p + 46 + nlen);
+      e.name = dec.decode(e.nameBytes);
+      const lnlen = dv.getUint16(lho + 26, true), lxlen = dv.getUint16(lho + 28, true);
+      const start = lho + 30 + lnlen + lxlen;
+      e.data = u8.slice(start, start + e.csize);
+      entries.push(e);
+      p += 46 + nlen + xlen + clen;
+    }
+    return entries;
+  }
+
+  function writeZip(entries) {
+    const parts = [];
+    const central = [];
+    let offset = 0;
+    for (const e of entries) {
+      const n = e.nameBytes;
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, e.version, true); h.setUint16(6, e.flags, true);
+      h.setUint16(8, e.method, true); h.setUint16(10, e.time, true); h.setUint16(12, e.date, true);
+      h.setUint32(14, e.crc, true); h.setUint32(18, e.csize, true); h.setUint32(22, e.usize, true);
+      h.setUint16(26, n.length, true); h.setUint16(28, 0, true);
+      parts.push(new Uint8Array(h.buffer), n, e.data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, e.versionMade, true); c.setUint16(6, e.version, true);
+      c.setUint16(8, e.flags, true); c.setUint16(10, e.method, true); c.setUint16(12, e.time, true);
+      c.setUint16(14, e.date, true); c.setUint32(16, e.crc, true); c.setUint32(20, e.csize, true);
+      c.setUint32(24, e.usize, true); c.setUint16(28, n.length, true); c.setUint32(42, offset, true);
+      central.push(new Uint8Array(c.buffer), n);
+      offset += 30 + n.length + e.data.length;
+    }
+    const cdSize = central.reduce((s, a) => s + a.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    const all = [...parts, ...central, new Uint8Array(end.buffer)];
+    const out = new Uint8Array(all.reduce((s, a) => s + a.length, 0));
+    let o = 0;
+    for (const a of all) { out.set(a, o); o += a.length; }
+    return out;
+  }
+
+  async function getText(e) {
+    const raw = e.method === 0 ? e.data : await inflate(e.data);
+    return new TextDecoder().decode(raw);
+  }
+  async function setText(e, text) {
+    const raw = new TextEncoder().encode(text);
+    e.crc = crc32(raw); e.usize = raw.length;
+    e.data = await deflate(raw); e.csize = e.data.length; e.method = 8;
+  }
+
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const COLS = 'ABCDEFGHIJKLMN'.split('');
+  const STYLES = [35, 36, 37, 37, 37, 37, 38, 39, 40, 38, 38, 37, 37, 38];
+
+  function excelSerial(isoDate) {
+    const [y, m, d] = isoDate.split('-').map(Number);
+    return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 864e5);
+  }
+
+  function cellXml(col, r, value, style) {
+    const ref = col + r;
+    if (value === null || value === undefined || value === '') return `<c r="${ref}" s="${style}"/>`;
+    if (typeof value === 'number') return `<c r="${ref}" s="${style}"><v>${value}</v></c>`;
+    return `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${esc(value)}</t></is></c>`;
+  }
+
+  // values: [dataISO, movim, estante, pt, caixa, sku, desc, lote, unid, solicitante, area, os, nf, obs]
+  function rowXml(r, values) {
+    const cells = values.map((v, i) => cellXml(COLS[i], r, i === 0 ? excelSerial(v) : v, STYLES[i]));
+    return `<row r="${r}" spans="1:14" x14ac:dyDescent="0.3">${cells.join('')}</row>`;
+  }
+
+  function firstFreeRow(sheetXml) {
+    const re = /<row r="(\d+)"[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g;
+    let m, lastUsed = 4;
+    while ((m = re.exec(sheetXml))) {
+      const r = Number(m[1]);
+      if (r < 5) continue;
+      const inner = m[2] || '';
+      const aCell = inner.match(new RegExp(`<c r="A${r}"[^>]*?(?:/>|>([\\s\\S]*?)</c>)`));
+      if (aCell && aCell[1] && /<v>|<is>/.test(aCell[1])) lastUsed = r;
+    }
+    return lastUsed + 1;
+  }
+
+  // Acrescenta as linhas e devolve {bytes, rows: [números de linha usados]}
+  async function appendMovements(xlsxBytes, movements) {
+    const entries = readZip(xlsxBytes);
+    const find = (n) => entries.find((e) => e.name === n);
+    const sheet = find('xl/worksheets/sheet2.xml'), table = find('xl/tables/table1.xml'), wb = find('xl/workbook.xml');
+    if (!sheet || !table || !wb) throw new Error('A planilha não tem a aba Movimentação no formato esperado');
+    let sx = await getText(sheet), tx = await getText(table), wx = await getText(wb);
+    if (!/name="movimentação"/.test(tx)) throw new Error('Tabela "movimentação" não encontrada');
+    const refMatch = tx.match(/ref="A4:N(\d+)"/);
+    let tableEnd = Number(refMatch[1]);
+    let r = firstFreeRow(sx);
+    const used = [];
+    for (const vals of movements) {
+      const xml = rowXml(r, vals);
+      const existing = new RegExp(`<row r="${r}"[^>]*?(?:/>|>[\\s\\S]*?</row>)`);
+      if (existing.test(sx)) sx = sx.replace(existing, xml);
+      else sx = sx.replace('</sheetData>', xml + '</sheetData>');
+      used.push(r);
+      r++;
+    }
+    const last = used[used.length - 1];
+    if (last > tableEnd) {
+      tableEnd = last;
+      tx = tx.replace(/ref="A4:N\d+"/g, `ref="A4:N${tableEnd}"`);
+      sx = sx.replace(/<dimension ref="([A-Z]+\d+):N\d+"\/>/, `<dimension ref="$1:N${tableEnd}"/>`);
+      sx = sx.replace(/sqref="B5:B\d+"/, `sqref="B5:B${tableEnd}"`);
+      await setText(table, tx);
+    }
+    await setText(sheet, sx);
+    if (!/fullCalcOnLoad=/.test(wx)) {
+      wx = wx.replace(/<calcPr([^>]*?)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>');
+      await setText(wb, wx);
+    }
+    return { bytes: writeZip(entries), rows: used };
+  }
+
+  /* ---------- aba Contagem: novos itens ---------- */
+  function colNum(c) { let n = 0; for (const ch of c) n = n * 26 + ch.charCodeAt(0) - 64; return n; }
+  function colName(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+  const ENT = [], SAI = [];
+  for (let n = colNum('H'); n <= colNum('BN'); n += 2) { ENT.push(colName(n)); SAI.push(colName(n + 1)); }
+
+  function lastItemRow(sx) {
+    const re = /<row r="(\d+)"[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g;
+    let m, last = 4;
+    while ((m = re.exec(sx))) {
+      const r = Number(m[1]);
+      if (r < 5 || !m[2]) continue;
+      const f = m[2].match(new RegExp(`<c r="F${r}"[^>]*?>([\\s\\S]*?)</c>`));
+      if (f && /<v>|<is>/.test(f[1])) last = r;
+    }
+    return last;
+  }
+
+  // vals: {estante, pt, caixa, sku, desc}
+  function contagemRowXml(tpl, tplRow, r, vals) {
+    let x = tpl.replace(new RegExp(`<row r="${tplRow}"`), `<row r="${r}"`)
+      .replace(new RegExp(`r="([A-Z]+)${tplRow}"`, 'g'), `r="$1${r}"`)
+      .replace(new RegExp(`Contagem!([A-Z]+)${tplRow}(?![0-9])`, 'g'), `Contagem!$1${r}`)
+      .replace(/(<\/f>)<v>[^<]*<\/v>/g, '$1');
+    const put = (col, value) => {
+      const re = new RegExp(`<c r="${col}${r}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+      const m = x.match(re);
+      const style = m && (m[1].match(/s="(\d+)"/) || [])[1];
+      const sAttr = style ? ` s="${style}"` : '';
+      const cell = typeof value === 'number'
+        ? `<c r="${col}${r}"${sAttr}><v>${value}</v></c>`
+        : `<c r="${col}${r}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${esc(value)}</t></is></c>`;
+      x = m ? x.replace(re, cell) : x;
+    };
+    put('B', vals.estante); put('C', vals.pt); put('D', vals.caixa); put('E', vals.sku); put('F', vals.desc);
+    const fcell = (col, formula) => {
+      const re = new RegExp(`<c r="${col}${r}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+      const m = x.match(re);
+      const style = m && (m[1].match(/s="(\d+)"/) || [])[1];
+      const cell = `<c r="${col}${r}"${style ? ` s="${style}"` : ''}><f>${formula}</f></c>`;
+      x = m ? x.replace(re, cell) : x;
+    };
+    fcell('BQ', ['G' + r, ...ENT.map((c) => c + r)].join('+'));
+    fcell('BR', SAI.map((c) => c + r).join('+'));
+    fcell('BS', `BQ${r}+BR${r}`);
+    return x;
+  }
+
+  async function addItems(entries, items) {
+    const sheet = entries.find((e) => e.name === 'xl/worksheets/sheet1.xml');
+    if (!sheet) throw new Error('A planilha não tem a aba Contagem no formato esperado');
+    let sx = await getText(sheet);
+    const tplRow = lastItemRow(sx);
+    const tm = sx.match(new RegExp(`<row r="${tplRow}"[^>]*>[\\s\\S]*?</row>`));
+    if (!tm) throw new Error('Não encontrei a última linha de itens da Contagem');
+    const used = [];
+    let r = tplRow + 1;
+    let insertXml = '';
+    for (const it of items) { insertXml += contagemRowXml(tm[0], tplRow, r, it); used.push(r); r++; }
+    const last = r - 1;
+    // insere logo após a última linha de item (antes de qualquer linha posterior)
+    const after = new RegExp(`(<row r="${tplRow}"[^>]*>[\\s\\S]*?</row>)`);
+    sx = sx.replace(after, `$1${insertXml}`);
+    const bump = (s, re, col) => s.replace(re, (all, a, n) => Number(n) < last ? all.replace(`${col}${n}`, `${col}${last}`) : all);
+    sx = bump(sx, /<dimension ref="([A-Z]+\d+):BS(\d+)"/, 'BS');
+    sx = bump(sx, /<autoFilter ref="(B4):BW(\d+)"/, 'BW');
+    sx = bump(sx, /sqref="(H5):BO(\d+)"/, 'BO');
+    await setText(sheet, sx);
+    const wbE = entries.find((e) => e.name === 'xl/workbook.xml');
+    let wx = await getText(wbE);
+    const wx2 = wx.replace(/(<definedName name="_xlnm\._FilterDatabase" localSheetId="0"[^>]*>Contagem!\$B\$4:\$BW\$)(\d+)/, (all, a, nn) => Number(nn) < last ? a + last : all);
+    if (wx2 !== wx) await setText(wbE, wx2);
+    return used;
+  }
+
+  /* ---------- remover uma aba inteira (ex.: Divergências) ---------- */
+  async function removeSheet(xlsxBytes, sheetName) {
+    const entries = readZip(xlsxBytes);
+    const find = (n) => entries.find((e) => e.name === n);
+    const wb = find('xl/workbook.xml'), rels = find('xl/_rels/workbook.xml.rels'), ct = find('[Content_Types].xml');
+    if (!wb || !rels) return xlsxBytes;
+    let wx = await getText(wb);
+    const sheets = [...wx.matchAll(/<sheet [^>]*?name="([^"]*)"[^>]*?r:id="([^"]+)"[^>]*\/>/g)];
+    const idx = sheets.findIndex((m) => m[1].normalize('NFC') === sheetName.normalize('NFC'));
+    if (idx < 0) return xlsxBytes;
+    const rid = sheets[idx][2];
+    let rx = await getText(rels);
+    const rel = rx.match(new RegExp(`<Relationship [^>]*Id="${rid}"[^>]*/>`));
+    const target = rel && (rel[0].match(/Target="([^"]+)"/) || [])[1];
+    if (!target) return xlsxBytes;
+    const path = 'xl/' + target.replace(/^\/?xl\//, '').replace(/^\//, '');
+    // aba e seus arquivos próprios (rels da aba)
+    const relPath = path.replace(/worksheets\/(sheet\d+\.xml)$/, 'worksheets/_rels/$1.rels');
+    const keep = entries.filter((e) => e.name !== path && e.name !== relPath);
+    rx = rx.replace(rel[0], '');
+    await setText(rels, rx);
+    wx = wx.replace(sheets[idx][0], '');
+    // índices locais de nomes definidos
+    wx = wx.replace(/<definedName([^>]*?) localSheetId="(\d+)"([^>]*)>([\s\S]*?)<\/definedName>/g, (all, a, n, b, t) => {
+      n = Number(n);
+      if (n === idx) return '';
+      return n > idx ? `<definedName${a} localSheetId="${n - 1}"${b}>${t}</definedName>` : all;
+    });
+    wx = wx.replace(/<definedNames>\s*<\/definedNames>/, '');
+    wx = wx.replace(/ activeTab="(\d+)"/, (all, n) => Number(n) >= sheets.length - 1 ? ' activeTab="0"' : all);
+    await setText(wb, wx);
+    if (ct) { let c = await getText(ct); c = c.replace(new RegExp(`<Override PartName="/${path.replace(/[.]/g, '\\.')}"[^>]*/>`), ''); await setText(ct, c); }
+    const app = find('docProps/app.xml');
+    if (app) {
+      let a = await getText(app);
+      const esc2 = sheetName.replace(/&/g, '&amp;');
+      if (a.includes(`<vt:lpstr>${esc2}</vt:lpstr>`)) {
+        a = a.replace(`<vt:lpstr>${esc2}</vt:lpstr>`, '')
+          .replace(/(<TitlesOfParts><vt:vector size=")(\d+)/, (m, p, n) => p + (Number(n) - 1))
+          .replace(/(<vt:lpstr>Planilhas<\/vt:lpstr><\/vt:variant><vt:variant><vt:i4>)(\d+)/, (m, p, n) => p + (Number(n) - 1))
+          .replace(/(<vt:lpstr>Worksheets<\/vt:lpstr><\/vt:variant><vt:variant><vt:i4>)(\d+)/, (m, p, n) => p + (Number(n) - 1));
+        await setText(app, a);
+      }
+    }
+    return writeZip(keep);
+  }
+
+  /* ---------- aba Contagem: excluir linhas ---------- */
+  const REF_RE = /(^|[^A-Za-z0-9_.\]\[#])(\$?)([A-Z]{1,3})(\$?)(\d+)(?![0-9A-Za-z_(\[])/g;
+  // desloca referências de linha numa fórmula: fn(row, absoluta) -> nova linha ou null (#REF!)
+  function mapRefs(f, fn) {
+    // não mexe em textos entre aspas (&quot;...&quot; ou "...")
+    const parts = f.split(/(&quot;[\s\S]*?&quot;|"[^"]*")/);
+    return parts.map((p, i) => i % 2 ? p : p.replace(REF_RE, (all, pre, d1, col, d2, row) => {
+      if (colNum(col) > 16384) return all;
+      const n = fn(Number(row), !!d2);
+      return n === null ? `${pre}#REF!` : `${pre}${d1}${col}${d2}${n}`;
+    })).join('');
+  }
+  const shiftAfter = (x) => (row) => row > x ? row - 1 : row === x ? null : row;
+  // transforma fórmulas compartilhadas em fórmulas normais (para poder apagar linhas com segurança)
+  function unshare(sx) {
+    const masters = {};
+    sx.replace(/<c r="([A-Z]+)(\d+)"[^>]*>\s*<f([^>]*)>([^<]*)<\/f>/g, (all, col, row, attrs, text) => {
+      if (/t="shared"/.test(attrs)) { const si = (attrs.match(/si="(\d+)"/) || [])[1]; if (si != null) masters[si] = { row: Number(row), text }; }
+      return all;
+    });
+    sx = sx.replace(/(<c r="[A-Z]+\d+"[^>]*>\s*)<f([^>]*)>([^<]*)<\/f>/g, (all, head, attrs, text) => /t="shared"/.test(attrs) ? `${head}<f>${text}</f>` : all);
+    sx = sx.replace(/(<c r="[A-Z]+(\d+)"[^>]*>\s*)<f([^>]*?)\/>/g, (all, head, row, attrs) => {
+      const si = (attrs.match(/si="(\d+)"/) || [])[1];
+      const m = masters[si];
+      if (!/t="shared"/.test(attrs) || !m) return all;
+      const off = Number(row) - m.row;
+      return `${head}<f>${mapRefs(m.text, (r, abs) => abs ? r : r + off)}</f>`;
+    });
+    return sx;
+  }
+  function shiftRanges(val, x) {
+    const out = [];
+    for (const rg of val.split(' ')) {
+      const m = rg.match(/^(\$?[A-Z]+\$?)(\d+)(?::(\$?[A-Z]+\$?)(\d+))?$/);
+      if (!m) { out.push(rg); continue; }
+      let r1 = Number(m[2]), r2 = m[4] ? Number(m[4]) : r1;
+      if (r1 === x && r2 === x) continue;
+      if (r1 > x) r1--;
+      if (r2 >= x) r2--;
+      out.push(m[3] ? `${m[1]}${r1}:${m[3]}${r2}` : `${m[1]}${r1}`);
+    }
+    return out.join(' ');
+  }
+  function deleteRowXml(sx, x) {
+    sx = sx.replace(new RegExp(`<row r="${x}"[^>]*?(?:/>|>[\\s\\S]*?</row>)`), '');
+    sx = sx.replace(/<row r="(\d+)"([^>]*?)(\/>|>[\s\S]*?<\/row>)/g, (all, r, attrs, body) => {
+      const n = Number(r);
+      if (n <= x) return all;
+      return `<row r="${n - 1}"${attrs}${body.replace(/ r="([A-Z]+)(\d+)"/g, (a, c, rr) => ` r="${c}${Number(rr) - 1}"`)}`;
+    });
+    const sh = shiftAfter(x);
+    sx = sx.replace(/<f([^>]*)>([^<]*)<\/f>/g, (all, attrs, text) => `<f${attrs}>${mapRefs(text, sh)}</f>`);
+    sx = sx.replace(/<formula>([^<]*)<\/formula>/g, (all, text) => `<formula>${mapRefs(text, sh)}</formula>`);
+    sx = sx.replace(/ (ref|sqref|activeCell|topLeftCell)="([^"]*)"/g, (all, k, v) => ` ${k}="${shiftRanges(v, x)}"`);
+    sx = sx.replace(/<mergeCell ref=""\/>|<conditionalFormatting sqref="">[\s\S]*?<\/conditionalFormatting>/g, '');
+    return sx;
+  }
+  // rows: números de linha da Contagem a apagar
+  async function removeItems(entries, rows) {
+    const sheet = entries.find((e) => e.name === 'xl/worksheets/sheet1.xml');
+    if (!sheet) throw new Error('A planilha não tem a aba Contagem no formato esperado');
+    let sx = unshare(await getText(sheet));
+    let numeros = rows.filter((r) => typeof r === 'number');
+    const chaves = rows.filter((r) => r && typeof r === 'object');
+    if (chaves.length) {
+      const alvo = new Set(chaves.map((k) => movKey(k.estante, k.pt, k.caixa, k.sku, k.desc)));
+      const sst = await sharedStrings(entries);
+      for (const m of sx.matchAll(/<row r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)) {
+        const r = Number(m[1]);
+        if (r < 5) continue;
+        const k = movKey(cellValue(m[2], 'B' + r, sst), cellValue(m[2], 'C' + r, sst), cellValue(m[2], 'D' + r, sst), cellValue(m[2], 'E' + r, sst), cellValue(m[2], 'F' + r, sst));
+        if (alvo.has(k)) numeros.push(r);
+      }
+    }
+    const lista = [...new Set(numeros.map(Number))].filter((r) => r >= 5).sort((a, b) => b - a);
+    for (const x of lista) {
+      const rm = sx.match(new RegExp(`<row r="${x}"[^>]*>[\\s\\S]*?</row>`));
+      if (!rm || !new RegExp(`<c r="F${x}"`).test(rm[0])) throw new Error(`Linha ${x} da Contagem não encontrada`);
+      sx = deleteRowXml(sx, x);
+    }
+    await setText(sheet, sx);
+    const wbE = entries.find((e) => e.name === 'xl/workbook.xml');
+    let wx = await getText(wbE);
+    for (const x of lista) {
+      wx = wx.replace(/(<definedName[^>]*>)([^<]*)(<\/definedName>)/g, (all, a, t, b) => /^'?Contagem'?!/.test(t) ? a + t.replace(/\$(\d+)/g, (m, n) => '$' + (Number(n) > x ? Number(n) - 1 : n)) + b : all);
+    }
+    await setText(wbE, wx);
+    // outras abas que citem células da Contagem
+    for (const e of entries.filter((e) => /^xl\/worksheets\/sheet\d+\.xml$/.test(e.name) && e !== sheet)) {
+      const t = await getText(e);
+      if (!/Contagem!/.test(t)) continue;
+      let t2 = t;
+      for (const x of lista) t2 = t2.replace(/Contagem!(\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?)/g, (all, ref) => 'Contagem!' + mapRefs(ref, shiftAfter(x)));
+      if (t2 !== t) await setText(e, t2);
+    }
+    return lista;
+  }
+
+  /* ---------- aba Movimentação: apagar todas as linhas de um item ---------- */
+  const xmlUnesc = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  async function sharedStrings(entries) {
+    const e = entries.find((x) => x.name === 'xl/sharedStrings.xml');
+    if (!e) return [];
+    const t = await getText(e);
+    return [...t.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => xmlUnesc([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join('')));
+  }
+  function cellValue(rowXml, ref, sst) {
+    const m = rowXml.match(new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`));
+    if (!m || !m[2]) return '';
+    if (/t="s"/.test(m[1])) { const v = (m[2].match(/<v>([^<]*)<\/v>/) || [])[1]; return v == null ? '' : (sst[Number(v)] ?? ''); }
+    if (/t="inlineStr"/.test(m[1])) return xmlUnesc([...m[2].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(''));
+    return xmlUnesc((m[2].match(/<v>([^<]*)<\/v>/) || [])[1] || '');
+  }
+  const keyNorm = (v) => String(v ?? '').normalize('NFC').trim().toUpperCase();
+  const movKey = (e, p, c, s, d) => [e, p, c, s, d].map(keyNorm).join('|');
+  // keys: [{estante, pt, caixa, sku, desc}] -> devolve as linhas apagadas (números antigos)
+  async function removeMovementsByKey(entries, keys, extraRows = []) {
+    const sheet = entries.find((e) => e.name === 'xl/worksheets/sheet2.xml');
+    const table = entries.find((e) => e.name === 'xl/tables/table1.xml');
+    if (!sheet || !table) throw new Error('A planilha não tem a aba Movimentação no formato esperado');
+    const alvo = new Set(keys.map((k) => movKey(k.estante, k.pt, k.caixa, k.sku, k.desc)));
+    const sst = await sharedStrings(entries);
+    let sx = await getText(sheet);
+    const linhas = [];
+    for (const m of sx.matchAll(/<row r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)) {
+      const r = Number(m[1]);
+      if (r < 5) continue;
+      const k = movKey(cellValue(m[2], 'C' + r, sst), cellValue(m[2], 'D' + r, sst), cellValue(m[2], 'E' + r, sst), cellValue(m[2], 'F' + r, sst), cellValue(m[2], 'G' + r, sst));
+      if (alvo.has(k)) linhas.push(r);
+    }
+    for (const r of extraRows) if (!linhas.includes(Number(r))) linhas.push(Number(r));
+    if (!linhas.length) return [];
+    let tx = await getText(table);
+    for (const x of [...linhas].sort((a, b) => b - a)) {
+      sx = deleteRowXml(sx, x);
+      tx = tx.replace(/ ref="([^"]*)"/g, (all, v) => ` ref="${shiftRanges(v, x)}"`);
+    }
+    await setText(sheet, sx);
+    await setText(table, tx);
+    return linhas;
+  }
+
+  /* ---------- corrigir cadastro: estante, PT, caixa, nome e seriais de um item já na planilha ---------- */
+  const numOuTexto = (v) => (typeof v === 'number' ? v : (/^\d+$/.test(String(v ?? '').trim()) ? Number(String(v).trim()) : (v ?? '')));
+  function trocarCelula(rowXml, col, r, value) {
+    const ref = col + r;
+    const re = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+    const m = rowXml.match(re);
+    if (m) {
+      const s = (m[1].match(/\bs="(\d+)"/) || [])[1] || '0';
+      return rowXml.replace(re, cellXml(col, r, value, s));
+    }
+    // célula ausente: insere na ordem das colunas
+    const novo = cellXml(col, r, value, '0');
+    const alvo = colNum(col);
+    let feito = false;
+    const out = rowXml.replace(/<c r="([A-Z]+)\d+"/g, (all, c) => { if (!feito && colNum(c) > alvo) { feito = true; return novo + all; } return all; });
+    return feito ? out : out + novo;
+  }
+  // list: [{ de: {estante, pt, caixa, sku, desc}, para: {estante, pt, caixa, desc}, seriais: {velho: novo} }]
+  async function corrigirCadastros(entries, list) {
+    if (!list.length) return { contagem: 0, movimentacao: 0 };
+    const sst = await sharedStrings(entries);
+    const porChave = new Map(list.map((c) => [movKey(c.de.estante, c.de.pt, c.de.caixa, c.de.sku, c.de.desc), c]));
+    let nCont = 0, nMov = 0;
+    const s1 = entries.find((e) => e.name === 'xl/worksheets/sheet1.xml');
+    if (s1) {
+      let sx = await getText(s1);
+      sx = sx.replace(/<row r="(\d+)"((?:[^>\/]|\/(?!>))*)>([\s\S]*?)<\/row>/g, (all, rs, attrs, body) => {
+        const r = Number(rs);
+        if (r < 5) return all;
+        const v = (c) => cellValue(body, c + r, sst);
+        const c = porChave.get(movKey(v('B'), v('C'), v('D'), v('E'), v('F')));
+        if (!c) return all;
+        nCont++;
+        let b = body;
+        b = trocarCelula(b, 'B', r, numOuTexto(c.para.estante));
+        b = trocarCelula(b, 'C', r, numOuTexto(c.para.pt));
+        b = trocarCelula(b, 'D', r, numOuTexto(c.para.caixa));
+        b = trocarCelula(b, 'F', r, String(c.para.desc));
+        if (c.para.sku != null) b = trocarCelula(b, 'E', r, numOuTexto(c.para.sku));
+        return `<row r="${rs}"${attrs}>${b}</row>`;
+      });
+      await setText(s1, sx);
+    }
+    const s2 = entries.find((e) => e.name === 'xl/worksheets/sheet2.xml');
+    if (s2) {
+      let sx = await getText(s2);
+      sx = sx.replace(/<row r="(\d+)"((?:[^>\/]|\/(?!>))*)>([\s\S]*?)<\/row>/g, (all, rs, attrs, body) => {
+        const r = Number(rs);
+        if (r < 5) return all;
+        const v = (c) => cellValue(body, c + r, sst);
+        const c = porChave.get(movKey(v('C'), v('D'), v('E'), v('F'), v('G')));
+        if (!c) return all;
+        nMov++;
+        let b = body;
+        b = trocarCelula(b, 'C', r, numOuTexto(c.para.estante));
+        b = trocarCelula(b, 'D', r, numOuTexto(c.para.pt));
+        b = trocarCelula(b, 'E', r, numOuTexto(c.para.caixa));
+        b = trocarCelula(b, 'G', r, String(c.para.desc));
+        if (c.para.sku != null) b = trocarCelula(b, 'F', r, numOuTexto(c.para.sku));
+        const ser = c.seriais || {}, lote = String(v('H')).trim();
+        if (lote && Object.prototype.hasOwnProperty.call(ser, lote)) b = trocarCelula(b, 'H', r, ser[lote]);
+        return `<row r="${rs}"${attrs}>${b}</row>`;
+      });
+      await setText(s2, sx);
+    }
+    const wb = entries.find((e) => e.name === 'xl/workbook.xml');
+    let wx = await getText(wb);
+    if (!/fullCalcOnLoad=/.test(wx)) { wx = wx.replace(/<calcPr([^>]*?)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>'); await setText(wb, wx); }
+    return { contagem: nCont, movimentacao: nMov };
+  }
+
+  /* ---------- aba Contagem sempre em ordem de estante, prateleira e caixa ---------- */
+  function chaveOrdem(v) {
+    const txt = (x) => String(x ?? '').trim().toUpperCase();
+    const num = (x) => { const n = Number(String(x).replace(',', '.')); return Number.isFinite(n) ? n : null; };
+    const e = txt(v.e), p = txt(v.p), c = txt(v.c);
+    // estante: números primeiro (1, 2 … 16), depois nomes (SUP), por último sem local (-)
+    const eGrupo = e === '' || e === '-' ? 2 : (num(e) != null ? 0 : 1);
+    const pNum = /^P(\d+)$/.exec(p);
+    const pGrupo = p === '' || p === '-' ? 2 : (pNum ? 0 : 1);
+    const cGrupo = c === '' || c === '-' ? 0 : (num(c) != null ? 1 : 2);
+    return [eGrupo, eGrupo === 0 ? num(e) : 0, e, pGrupo, pNum ? Number(pNum[1]) : 0, p, cGrupo, cGrupo === 1 ? num(c) : 0, c, txt(v.d)];
+  }
+  function compararChaves(a, b) {
+    for (let i = 0; i < a.length; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; }
+    return 0;
+  }
+  async function ordenarContagem(entries) {
+    const s1 = entries.find((e) => e.name === 'xl/worksheets/sheet1.xml');
+    if (!s1) return false;
+    const sst = await sharedStrings(entries);
+    let sx = await getText(s1);
+    const ini = sx.indexOf('<sheetData>'), fim = sx.indexOf('</sheetData>');
+    if (ini < 0 || fim < 0) return false;
+    const corpo = sx.slice(ini + 11, fim);
+    const linhas = [...corpo.matchAll(/<row r="(\d+)"((?:[^>\/]|\/(?!>))*)>([\s\S]*?)<\/row>|<row r="(\d+)"[^>]*\/>/g)];
+    const cab = [], dados = [];
+    for (const m of linhas) {
+      const r = Number(m[1] || m[4]);
+      if (r < 5 || !m[1]) { cab.push({ r, xml: m[0] }); continue; }
+      const v = (c) => cellValue(m[3], c + r, sst);
+      if (String(v('F')).trim() === '') { cab.push({ r, xml: m[0] }); continue; }
+      dados.push({ r, attrs: m[2], body: m[3], k: chaveOrdem({ e: v('B'), p: v('C'), c: v('D'), d: v('F') }) });
+    }
+    if (!dados.length) return false;
+    const linhasDados = dados.map((d) => d.r).sort((a, b) => a - b);
+    const ordenado = dados.slice().sort((a, b) => compararChaves(a.k, b.k) || a.r - b.r);
+    if (ordenado.every((d, i) => d.r === linhasDados[i])) return false; // já está em ordem
+    const novas = ordenado.map((d, i) => {
+      const nova = linhasDados[i];
+      if (nova === d.r) return { r: nova, xml: `<row r="${nova}"${d.attrs}>${d.body}</row>` };
+      let body = d.body.replace(new RegExp(`(<c r="[A-Z]+)${d.r}"`, 'g'), `$1${nova}"`);
+      body = body.replace(/<f([^>]*)>([\s\S]*?)<\/f>/g, (all, at, f) => `<f${at}>${f.replace(new RegExp(`(^|[^A-Za-z$\\d_])([A-Z]{1,3})${d.r}(?!\\d)`, 'g'), `$1$2${nova}`)}</f>`);
+      return { r: nova, xml: `<row r="${nova}"${d.attrs}>${body}</row>` };
+    });
+    const todas = cab.concat(novas).sort((a, b) => a.r - b.r);
+    sx = sx.slice(0, ini + 11) + todas.map((x) => x.xml).join('') + sx.slice(fim);
+    await setText(s1, sx);
+    return true;
+  }
+
+  // ficha do item: todas as linhas da Movimentação de um item (por estante, PT, caixa, SKU e descrição)
+  async function readMovements(xlsxBytes, key) {
+    const entries = readZip(xlsxBytes);
+    const sheet = entries.find((e) => e.name === 'xl/worksheets/sheet2.xml');
+    if (!sheet) return [];
+    const sst = await sharedStrings(entries);
+    const sx = await getText(sheet);
+    const alvo = key ? movKey(key.estante, key.pt, key.caixa, key.sku, key.desc) : null;
+    const out = [];
+    for (const m of sx.matchAll(/<row r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)) {
+      const r = Number(m[1]);
+      if (r < 5) continue;
+      const v = (c) => cellValue(m[2], c + r, sst);
+      if (alvo && movKey(v('C'), v('D'), v('E'), v('F'), v('G')) !== alvo) continue;
+      if (!alvo && !v('G')) continue;
+      out.push({ row: r, estante: v('C'), pt: v('D'), caixa: v('E'), sku: v('F'), desc: v('G'), data: v('A'), movim: v('B'), lote: v('H'), unid: Number(v('I')) || 0, solicitante: v('J'), area: v('K'), os: v('L'), nf: v('M'), obs: v('N') });
+    }
+    return out;
+  }
+
+  // Aplica novos itens (Contagem) e movimentações (Movimentação) num só arquivo.
+  // Reescreve linhas já existentes da Movimentação: [{row, values}]
+  async function rewriteRows(xlsxBytes, list) {
+    const entries = readZip(xlsxBytes);
+    const sheet = entries.find((e) => e.name === 'xl/worksheets/sheet2.xml');
+    let sx = await getText(sheet);
+    for (const { row, values } of list) {
+      const re = new RegExp(`<row r="${row}"[^>]*?(?:/>|>[\\s\\S]*?</row>)`);
+      if (!re.test(sx)) throw new Error(`Linha ${row} da Movimentação não encontrada`);
+      sx = sx.replace(re, rowXml(row, values));
+    }
+    await setText(sheet, sx);
+    const wb = entries.find((e) => e.name === 'xl/workbook.xml');
+    let wx = await getText(wb);
+    if (!/fullCalcOnLoad=/.test(wx)) { wx = wx.replace(/<calcPr([^>]*?)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>'); await setText(wb, wx); }
+    return writeZip(entries);
+  }
+
+  async function applyChanges(xlsxBytes, { items = [], movements = [], descartes = null, ajustes = [], remover = [], removerMov = [], tirarLinhas = [], cadastros = [] }) {
+    let bytes = xlsxBytes, itemRows = [], rows = [], movRemovidas = [], corrigidos = null;
+    if (cadastros.length) { const entries = readZip(bytes); corrigidos = await corrigirCadastros(entries, cadastros); bytes = writeZip(entries); }
+    if (ajustes.length) bytes = await rewriteRows(bytes, ajustes);
+    if (remover.length || removerMov.length || tirarLinhas.length) {
+      const entries = readZip(bytes);
+      if (remover.length) await removeItems(entries, remover);
+      if (removerMov.length || tirarLinhas.length) movRemovidas = await removeMovementsByKey(entries, removerMov, tirarLinhas);
+      const wb = entries.find((e) => e.name === 'xl/workbook.xml');
+      let wx = await getText(wb);
+      if (!/fullCalcOnLoad=/.test(wx)) { wx = wx.replace(/<calcPr([^>]*?)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>'); await setText(wb, wx); }
+      bytes = writeZip(entries);
+    }
+    if (items.length) {
+      const entries = readZip(bytes);
+      itemRows = await addItems(entries, items);
+      const wb = entries.find((e) => e.name === 'xl/workbook.xml');
+      let wx = await getText(wb);
+      if (!/fullCalcOnLoad=/.test(wx)) { wx = wx.replace(/<calcPr([^>]*?)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>'); await setText(wb, wx); }
+      bytes = writeZip(entries);
+    }
+    if (movements.length) {
+      const out = await appendMovements(bytes, movements);
+      bytes = out.bytes; rows = out.rows;
+    }
+    // descartes: função (rows) => records, chamada depois das movimentações para saber as linhas da baixa
+    if (descartes) bytes = await writeDescartes(bytes, descartes(rows));
+    try { const entries = readZip(bytes); if (await ordenarContagem(entries)) bytes = writeZip(entries); } catch (e) { console.warn('ordenar Contagem', e); }
+    return { bytes, itemRows, rows, movRemovidas, corrigidos };
+  }
+
+  /* ---------- aba DESCARTES ---------- */
+  const DESC_HEAD = ['Nº', 'Data', 'SKU', 'Material', 'Serial / Lote', 'Qtd', 'Local de origem', 'Motivo', 'Destino', 'Responsável', 'Autorizado por', 'Documento / Laudo', 'Baixa no estoque', 'Observação'];
+  const DESC_W = [9, 11, 9, 38, 30, 6, 22, 16, 22, 18, 18, 20, 26, 40];
+  const DESC_S = [37, 35, 37, 38, 39, 37, 38, 38, 38, 38, 38, 38, 38, 38];
+
+  async function sheetPathByName(entries, name) {
+    const wb = await getText(entries.find((e) => e.name === 'xl/workbook.xml'));
+    const rels = await getText(entries.find((e) => e.name === 'xl/_rels/workbook.xml.rels'));
+    const sheets = [...wb.matchAll(/<sheet [^>]*?name="([^"]+)"[^>]*?r:id="([^"]+)"[^>]*\/>/g)];
+    const idx = sheets.findIndex((m) => m[1] === name);
+    if (idx < 0) return null;
+    const rid = sheets[idx][2];
+    const rel = rels.match(new RegExp(`<Relationship [^>]*Id="${rid}"[^>]*Target="([^"]+)"`)) || rels.match(new RegExp(`<Relationship [^>]*Target="([^"]+)"[^>]*Id="${rid}"`));
+    if (!rel) return null;
+    return { path: 'xl/' + rel[1].replace(/^\/?xl\//, ''), index: idx };
+  }
+
+  // records: [{num, data (ISO ou ''), sku, material, serial, qtd, origem, motivo, destino, responsavel, autorizado, documento, baixa, obs}]
+  async function writeDescartes(xlsxBytes, records) {
+    const entries = readZip(xlsxBytes);
+    const found = await sheetPathByName(entries, 'DESCARTES');
+    if (!found) throw new Error('A planilha não tem a aba DESCARTES');
+    const sheet = entries.find((e) => e.name === found.path);
+    const old = await getText(sheet);
+    const head = old.match(/^[\s\S]*?<worksheet[^>]*>/)[0];
+    const n = records.length + 1;
+    const rowsXml = [];
+    rowsXml.push(`<row r="1" spans="1:14" ht="30" customHeight="1">${DESC_HEAD.map((h, i) => cellXml(colName(i + 1), 1, h, 41)).join('')}</row>`);
+    records.forEach((d, k) => {
+      const r = k + 2;
+      const vals = [d.num, d.data ? excelSerial(d.data) : '-', d.sku ?? '-', d.material, d.serial || '-', Number(d.qtd) || 0, d.origem || '-', d.motivo || '-', d.destino || '-', d.responsavel || '-', d.autorizado || '-', d.documento || '-', d.baixa || '-', d.obs || ''];
+      rowsXml.push(`<row r="${r}" spans="1:14">${vals.map((v, i) => cellXml(colName(i + 1), r, v, DESC_S[i])).join('')}</row>`);
+    });
+    const cols = DESC_W.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
+    const xml = `${head}<dimension ref="A1:N${n}"/><sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="14.4" x14ac:dyDescent="0.3"/><cols>${cols}</cols><sheetData>${rowsXml.join('')}</sheetData><autoFilter ref="A1:N${n}"/><pageMargins left="0.511811024" right="0.511811024" top="0.787401575" bottom="0.787401575" header="0.31496062" footer="0.31496062"/></worksheet>`;
+    await setText(sheet, xml);
+    const wbE = entries.find((e) => e.name === 'xl/workbook.xml');
+    let wx = await getText(wbE);
+    const dn = `<definedName name="_xlnm._FilterDatabase" localSheetId="${found.index}" hidden="1">DESCARTES!$A$1:$N$${n}</definedName>`;
+    const reDn = new RegExp(`<definedName name="_xlnm\\._FilterDatabase" localSheetId="${found.index}"[^>]*>[^<]*</definedName>`);
+    if (reDn.test(wx)) wx = wx.replace(reDn, dn);
+    else if (/<definedNames>/.test(wx)) wx = wx.replace('<definedNames>', '<definedNames>' + dn);
+    else wx = wx.replace('</sheets>', '</sheets><definedNames>' + dn + '</definedNames>');
+    await setText(wbE, wx);
+    return writeZip(entries);
+  }
+
+
+  /* ---------- travas para quem usa a planilha direto no Excel ----------
+     Movimentação: listas e conferências na digitação + linha vermelha quando algo está errado.
+     Contagem e DESCARTES: abas protegidas (sem senha), só o formulário escreve nelas.
+     Pasta de trabalho: estrutura travada (não dá para apagar, renomear ou mover abas). */
+  const ERRO_DXF = '<dxf><font><b/><color rgb="FF9C0006"/></font><fill><patternFill><bgColor rgb="FFFFC7CE"/></patternFill></fill></dxf>';
+  const xmlEsc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const itemExiste = (r) => `COUNTIFS(Contagem!$B$5:$B$5000,$C${r},Contagem!$C$5:$C$5000,$D${r},Contagem!$D$5:$D$5000,$E${r},Contagem!$E$5:$E$5000,$F${r},Contagem!$F$5:$F$5000,$G${r})`;
+  const formulaErro = (r) => `AND($G${r}<>"",OR(AND($B${r}<>"Entrada",$B${r}<>"Saída",$B${r}<>"Saldo Inicial"),AND($B${r}="Saída",N($I${r})>=0),AND($B${r}="Entrada",N($I${r})<=0),AND(COUNTBLANK($C${r}:$G${r})=0,${itemExiste(r)}=0),AND($H${r}<>"",$H${r}<>"-",ABS(N($I${r}))<>1),NOT(ISNUMBER($A${r}))))`;
+  const PROT = '<sheetProtection sheet="1" objects="1" scenarios="1" formatColumns="0" formatRows="0" autoFilter="0"/>';
+  const AVISO_DXF = '<dxf><font><color rgb="FF7F6000"/></font><fill><patternFill><bgColor rgb="FFFFEB9C"/></patternFill></fill></dxf>';
+  const PREENCHER = 10; // linhas vazias que já vão com o preenchimento automático
+  const nDesc = (r) => `COUNTIF(Contagem!$F$5:$F$5000,$G${r})`;
+  // Estante, PT, Caixa e SKU vêm da Contagem pela descrição (só quando a descrição é de um único lugar)
+  const fBusca = (r, col) => `IF(OR($G${r}="",${nDesc(r)}<>1),"",INDEX(Contagem!$${col}$5:$${col}$5000,MATCH($G${r},Contagem!$F$5:$F$5000,0)))`;
+  function linhaPreenchida(r) {
+    const c = (col, st, f) => f ? `<c r="${col}${r}" s="${st}" t="str"><f>${xmlEsc(f)}</f></c>` : `<c r="${col}${r}" s="${st}"/>`;
+    const cells = [
+      c('A', STYLES[0]), c('B', STYLES[1]),
+      c('C', STYLES[2], fBusca(r, 'B')), c('D', STYLES[3], fBusca(r, 'C')), c('E', STYLES[4], fBusca(r, 'D')), c('F', STYLES[5], fBusca(r, 'E')),
+      c('G', STYLES[6]), c('H', STYLES[7], `IF($G${r}="","","-")`), c('I', STYLES[8]), c('J', STYLES[9]),
+      c('K', STYLES[10], `IF($G${r}="","",IF($B${r}="Entrada","ESTOQUE",""))`), c('L', STYLES[11], `IF($G${r}="","","0000/00")`),
+      c('M', STYLES[12], `IF($G${r}="","","-")`), c('N', STYLES[13])
+    ];
+    return `<row r="${r}" spans="1:14" x14ac:dyDescent="0.3">${cells.join('')}</row>`;
+  }
+  // tira as linhas vazias do fim e põe linhas prontas (com fórmulas) para quem lança direto no Excel
+  function preencherLinhasVazias(x) {
+    let uso = 4;
+    for (const m of x.matchAll(/<row r="(\d+)"[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)) if (/<v>[^<]+<\/v>|<is>/.test(m[2] || '')) uso = Math.max(uso, Number(m[1]));
+    x = x.replace(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, (m0, r) => (Number(r) > uso ? '' : m0));
+    let novas = '';
+    for (let r = uso + 1; r <= uso + PREENCHER; r++) novas += linhaPreenchida(r);
+    if (/<sheetData\/>/.test(x)) x = x.replace('<sheetData/>', `<sheetData>${novas}</sheetData>`);
+    else x = x.replace('</sheetData>', novas + '</sheetData>');
+    return { x, uso };
+  }
+  function validacoesMov() {
+    const dv = (attrs, f1) => `<dataValidation ${attrs}>${f1 != null ? `<formula1>${xmlEsc(f1)}</formula1>` : ''}</dataValidation>`;
+    const msg = (titulo, texto) => `promptTitle="${xmlEsc(titulo)}" prompt="${xmlEsc(texto)}"`;
+    const err = (titulo, texto) => `errorStyle="stop" errorTitle="${xmlEsc(titulo)}" error="${xmlEsc(texto)}"`;
+    const L = 20000;
+    const lista = [
+      dv(`type="date" operator="greaterThan" allowBlank="1" showInputMessage="1" showErrorMessage="1" ${err('Data inválida', 'Digite a data assim: 23/11/2026.')} ${msg('Data', 'Dia do movimento, ex.: 23/11/2026.')} sqref="A5:A${L}"`, '36526'),
+      dv(`type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" ${err('Movimento inválido', 'Escolha Entrada ou Saída na lista.')} ${msg('Movimento', 'Escolha Entrada ou Saída.')} sqref="B5:B${L}"`, '"Entrada,Saída"'),
+      dv(`type="custom" allowBlank="1" showInputMessage="1" showErrorMessage="1" ${err('Item não encontrado', 'Não existe item com essa Estante, PT, Caixa, SKU e Descrição. Copie esses 5 campos de uma linha do mesmo item ou confira na aba Contagem. Item novo: cadastre pelo formulário.')} ${msg('Item', 'Copie Estante, PT, Nº Caixa, SKU e Descrição de uma linha que já existe do mesmo item.')} sqref="C5:F${L}"`, `OR(COUNTBLANK($C5:$G5)>0,${itemExiste(5)}>0)`),
+      dv(`type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" ${err('Item não encontrado', 'Escolha a descrição na lista (setinha da célula). Item que não está na lista ainda não foi cadastrado: fale com o almoxarifado.')} ${msg('Descrição', 'Escolha o item na lista. Estante, PT, Caixa e SKU se preenchem sozinhos. Se ficarem amarelos, o item existe em mais de um lugar: digite o local certo.')} sqref="G5:G${L}"`, 'Contagem!$F$5:$F$5000'),
+      dv(`type="custom" allowBlank="1" showInputMessage="1" showErrorMessage="1" ${err('Serial', 'Com serial, é um serial por linha e a quantidade é 1 (entrada) ou -1 (saída).')} ${msg('Serial / lote', 'Um serial por linha. Sem serial, deixe -')} sqref="H5:H${L}"`, 'OR($H5="",$H5="-",$I5="",ABS(N($I5))=1)'),
+      dv(`type="custom" allowBlank="1" showInputMessage="1" showErrorMessage="1" ${err('Quantidade', 'Entrada: número positivo (ex.: 2). Saída: número negativo (ex.: -2). Com serial: 1 ou -1. Escolha o Movimento (coluna B) antes.')} ${msg('Quantidade', 'Entrada positiva (2). Saída negativa (-2). Com serial: 1 ou -1.')} sqref="I5:I${L}"`, 'AND(ISNUMBER($I5),$I5<>0,IF($B5="Saída",$I5<0,$I5>0),OR($H5="",$H5="-",ABS($I5)=1))'),
+      dv(`allowBlank="1" showInputMessage="1" ${msg('Quem', 'Saída: quem retirou. Entrada: quem trouxe ou o fornecedor.')} sqref="J5:J${L}"`),
+      dv(`allowBlank="1" showInputMessage="1" ${msg('Área', 'Saída: setor de destino (MONTAGEM, MANUTENÇÃO...). Entrada: ESTOQUE.')} sqref="K5:K${L}"`)
+    ];
+    return `<dataValidations count="${lista.length}">${lista.join('')}</dataValidations>`;
+  }
+  function protegerAba(xml) {
+    if (/<sheetProtection\b/.test(xml)) return xml;
+    if (/<\/sheetCalcPr>|<sheetCalcPr[^>]*\/>/.test(xml)) return xml.replace(/(<sheetCalcPr[^>]*\/>|<\/sheetCalcPr>)/, '$1' + PROT);
+    if (/<sheetData\/>/.test(xml)) return xml.replace('<sheetData/>', '<sheetData/>' + PROT);
+    return xml.replace('</sheetData>', '</sheetData>' + PROT);
+  }
+  async function protegerPlanilha(xlsxBytes) {
+    const entries = readZip(xlsxBytes);
+    // estilo vermelho de erro
+    const st = entries.find((e) => e.name === 'xl/styles.xml');
+    let sx = await getText(st), dxfId;
+    const md = sx.match(/<dxfs\b[^>]*>([\s\S]*?)<\/dxfs>/);
+    if (md) {
+      const lista = [...md[1].matchAll(/<dxf>[\s\S]*?<\/dxf>|<dxf\/>/g)].map((x) => x[0]);
+      dxfId = lista.indexOf(ERRO_DXF);
+      if (dxfId < 0) { dxfId = lista.length; sx = sx.replace(md[0], `<dxfs count="${lista.length + 1}">${md[1]}${ERRO_DXF}</dxfs>`); await setText(st, sx); }
+    } else {
+      dxfId = 0;
+      sx = /<dxfs\b[^>]*\/>/.test(sx) ? sx.replace(/<dxfs\b[^>]*\/>/, `<dxfs count="1">${ERRO_DXF}</dxfs>`) : sx.replace('</cellStyles>', `</cellStyles><dxfs count="1">${ERRO_DXF}</dxfs>`);
+      await setText(st, sx);
+    }
+    // amarelo de "confira": item com a mesma descrição em mais de um lugar
+    let avisoId;
+    {
+      let sy = await getText(st);
+      const m2 = sy.match(/<dxfs\b[^>]*>([\s\S]*?)<\/dxfs>/);
+      const lista = [...m2[1].matchAll(/<dxf>[\s\S]*?<\/dxf>|<dxf\/>/g)].map((q) => q[0]);
+      avisoId = lista.indexOf(AVISO_DXF);
+      if (avisoId < 0) { avisoId = lista.length; sy = sy.replace(m2[0], `<dxfs count="${lista.length + 1}">${m2[1]}${AVISO_DXF}</dxfs>`); await setText(st, sy); }
+    }
+    // Movimentação
+    const mov = await sheetPathByName(entries, 'Movimentação');
+    if (mov) {
+      const e = entries.find((x) => x.name === mov.path);
+      let x = await getText(e);
+      let ultima = 4;
+      for (const m of x.matchAll(/<row r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)) if (/<v>[^<]+<\/v>|<is>/.test(m[2])) ultima = Math.max(ultima, Number(m[1]));
+      x = preencherLinhasVazias(x).x;
+      const cfs = [...x.matchAll(/<conditionalFormatting\b[\s\S]*?<\/conditionalFormatting>/g)].map((m) => m[0]).filter((b) => !b.includes('COUNTIFS(Contagem!$B$5:$B$5000') && !b.includes('COUNTIF(Contagem!$F$5:$F$5000'));
+      x = x.replace(/<conditionalFormatting\b[\s\S]*?<\/conditionalFormatting>/g, '').replace(/<dataValidations\b[\s\S]*?<\/dataValidations>/g, '');
+      const r0 = ultima + 1;
+      const nossa = `<conditionalFormatting sqref="A${r0}:N20000"><cfRule type="expression" dxfId="${dxfId}" priority="1" stopIfTrue="1"><formula>${xmlEsc(formulaErro(r0))}</formula></cfRule></conditionalFormatting>`
+        + `<conditionalFormatting sqref="C${r0}:F20000"><cfRule type="expression" dxfId="${avisoId}" priority="2"><formula>${xmlEsc(`AND($G${r0}<>"",${nDesc(r0)}>1,COUNTBLANK($C${r0}:$F${r0})>0)`)}</formula></cfRule></conditionalFormatting>`;
+      let p = 1;
+      const blocos = [nossa, ...cfs].join('').replace(/priority="\d+"/g, () => `priority="${p++}"`);
+      const ins = blocos + validacoesMov();
+      const m = x.match(/<(hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|rowBreaks|colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|picture|oleObjects|controls|webPublishItems|tableParts|extLst)\b/);
+      x = m ? x.slice(0, m.index) + ins + x.slice(m.index) : x.replace('</worksheet>', ins + '</worksheet>');
+      await setText(e, x);
+    }
+    for (const nome of ['Contagem', 'DESCARTES']) {
+      const f = await sheetPathByName(entries, nome);
+      if (!f) continue;
+      const e = entries.find((x) => x.name === f.path);
+      await setText(e, protegerAba(await getText(e)));
+    }
+    // Contagem: azul só para número maior que zero (célula ainda sem cálculo não pinta)
+    const cont = await sheetPathByName(entries, 'Contagem');
+    if (cont) {
+      const e = entries.find((x) => x.name === cont.path);
+      let x = await getText(e);
+      const y = x.replace(/<cfRule type="cellIs" dxfId="(\d+)" priority="(\d+)" operator="greaterThan"><formula>0<\/formula><\/cfRule>/g, (m, d, p) => `<cfRule type="expression" dxfId="${d}" priority="${p}"><formula>AND(ISNUMBER(H5),H5&gt;0)</formula></cfRule>`)
+        .replace(/<cfRule type="cellIs" dxfId="(\d+)" priority="(\d+)" operator="lessThan"><formula>0<\/formula><\/cfRule>/g, (m, d, p) => `<cfRule type="expression" dxfId="${d}" priority="${p}"><formula>AND(ISNUMBER(H5),H5&lt;0)</formula></cfRule>`);
+      if (y !== x) await setText(e, y);
+    }
+    const wbE = entries.find((e) => e.name === 'xl/workbook.xml');
+    let wx = await getText(wbE);
+    // sempre recalcular ao abrir: o formulário grava fórmulas sem o resultado pronto
+    if (/<calcPr\b[^>]*fullCalcOnLoad=/.test(wx)) wx = wx.replace(/fullCalcOnLoad="[^"]*"/, 'fullCalcOnLoad="1"');
+    else if (/<calcPr\b/.test(wx)) wx = wx.replace(/<calcPr\b/, '<calcPr fullCalcOnLoad="1"');
+    else wx = wx.replace(/<\/workbook>/, '<calcPr fullCalcOnLoad="1"/></workbook>');
+    await setText(wbE, wx);
+    if (!/<workbookProtection\b/.test(wx)) {
+      wx = /<bookViews>/.test(wx) ? wx.replace('<bookViews>', '<workbookProtection lockStructure="1"/><bookViews>') : wx.replace('<sheets>', '<workbookProtection lockStructure="1"/><sheets>');
+      await setText(wbE, wx);
+    }
+    return writeZip(entries);
+  }
+
+  function toBase64(u8) {
+    let s = '';
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function fromBase64(b64) {
+    const s = atob(b64.trim());
+    const u8 = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+    return u8;
+  }
+
+  return { getText, setText, protegerPlanilha, ordenarContagem, corrigirCadastros, readMovements, removeSheet, appendMovements, applyChanges, writeDescartes, rewriteRows, toBase64, fromBase64, readZip, writeZip, crc32, firstFreeRow };
+})();
+if (typeof module !== 'undefined') module.exports = XLSX_EDIT;
+
+</script>
+<script>
 "use strict";
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 const html = htm.bind(React.createElement);
@@ -206,20 +1030,20 @@ const COLS = ["itens", "operadores", "movs", "requisicoes"];
 const porNome = (a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR");
 const ORDEM = { itens: porNome, operadores: porNome, movs: (a, b) => (a.n || 0) - (b.n || 0), requisicoes: (a, b) => String(a.num).localeCompare(String(b.num)) };
 function vazio() {
-  return { itens: [], operadores: [], movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false }, importacao: null, envio: null };
+  return { itens: [], operadores: [], movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false }, importacao: null, envio: null, planilha: null };
 }
 function completar(d) {
   const v = vazio();
   return { itens: d.itens || [], operadores: d.operadores || [], movs: d.movs || [], requisicoes: d.requisicoes || [],
     seq: { mov: d.seq?.mov || (d.movs || []).length, req: d.seq?.req || (d.requisicoes || []).length },
-    integracao: { ...v.integracao, ...(d.integracao || {}) }, importacao: d.importacao || null, envio: d.envio || null };
+    integracao: { ...v.integracao, ...(d.integracao || {}) }, importacao: d.importacao || null, envio: d.envio || null, planilha: d.planilha || null };
 }
 function carregarLocal() {
   try { const raw = localStorage.getItem(CHAVE); if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.itens) && !d.exemplo) return completar(d); } } catch (_) {}
   return vazio();
 }
 function salvarLocal(db) { try { localStorage.setItem(CHAVE, JSON.stringify(db)); return true; } catch (_) { return false; } }
-const configDoc = (d) => ({ seq: d.seq, integracao: d.integracao, importacao: d.importacao || null, envio: d.envio || null });
+const configDoc = (d) => ({ seq: d.seq, integracao: d.integracao, importacao: d.importacao || null, envio: d.envio || null, planilha: d.planilha || null });
 const semId = (o) => { const { id, ...r } = o; return r; };
 /* grava no banco só o que mudou entre dois estados */
 async function gravarDiferencas(banco, antes, depois) {
@@ -242,7 +1066,9 @@ function erroBanco(e) {
   return "Não consegui salvar no banco agora. Confira a internet e tente de novo.";
 }
 
-/* ================= Planilha oficial (aba Movimentação, 14 colunas) ================= */
+/* ================= Planilha oficial (CONTROLE DE ESTOQUES 2.0 no SharePoint) ================= */
+const ALVO_PADRAO = { driveId: "b!LPXDUvDuyEGCG9A4ADdab6KR9sYlxjhAhXeV5QbT2QF3s5vcJA-zS46FZdZXpmx6", itemId: "01CAA4DIGIC4EC6KIMPJB3K6IGY73FVYDJ", arquivo: "CONTROLE DE ESTOQUES 2.0.xlsx" };
+const APARELHO = uid("ap");
 const separarLotes = (t) => String(t || "").split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
 const COLS_PLANILHA = ["Data", "Movim", "Estante", "PT", "Nº Caixa", "SKU", "DESCRIÇÃO", "Lote/ Controle", "Unid", "Solicitante / Fornecedor", "Área", "Ordem de Serviço", "Nota Fisca/DOC", "Observação"];
 function partesLocal(local) {
@@ -253,33 +1079,143 @@ function partesLocal(local) {
   return [est || "-", pt || "-", cx || "-"];
 }
 const dataBR = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }); };
-const maiusc = (t) => String(t || "").trim().toLocaleUpperCase("pt-BR");
-/* uma linha por movimentação; itens com serial viram uma linha por serial (+1/-1), como na planilha */
-function linhasPlanilha(db, movs) {
-  const out = [];
-  for (const m of movs) {
-    const it = db.itens.find((i) => i.id === m.itemId) || {};
-    const entra = m.tipo === "Entrada" || (m.tipo === "Ajuste" && m.qtd >= 0);
-    const q = Math.abs(m.qtd);
-    const [est, pt, cx] = partesLocal(it.local);
-    const base = (lote, qq) => [dataBR(m.dataHora), entra ? "Entrada" : "Saída", est, pt, cx, m.sku || it.sku || "-", maiusc(m.nome || it.nome), lote || "-",
-      (entra ? "+" : "-") + String(qq).replace(".", ","), maiusc(m.operadorNome) || (entra ? "-" : ""), entra ? "ESTOQUE" : maiusc(m.destino),
-      m.os || "0000/00", m.nf || "-", [m.tipo === "Ajuste" ? "Ajuste de contagem" : "", m.obs].filter(Boolean).join(" · ")];
-    const lotes = separarLotes(m.lote);
-    if (lotes.length > 1 && lotes.length === q) lotes.forEach((l) => out.push(base(l, 1)));
-    else out.push(base(lotes.join(", "), q));
-  }
-  return out;
+const maiusc = (t) => String(t || "").trim().replace(/\s+/g, " ").toLocaleUpperCase("pt-BR");
+const semAcento = (t) => maiusc(t).normalize("NFD").replace(/[̀-ͯ]/g, "");
+const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : isoLocal(d).slice(0, 10); };
+const numOuTexto = (v) => { const t = String(v == null ? "" : v).trim(); return /^\d+$/.test(t) ? Number(t) : (t || "-"); };
+const SETORES_PLANILHA = { MONTAGEM: "MONTAGEM", MANUTENCAO: "MANUTENÇÃO", OPERADOR: "OPERADOR", LOGISTICA: "LOGISTICA", COMERCIAL: "COMERCIAL", ESTOQUE: "ESTOQUE" };
+function areaSaida(destino) {
+  const k = semAcento(destino);
+  if (!k || k === "-") return "NÃO INFORMADO";
+  if (k.startsWith("TRANSFERENCIA")) return "TRANSFERÊNCIA INTERNA";
+  if (k.startsWith("AJUSTE")) return "AJUSTE DE INVENTÁRIO";
+  return SETORES_PLANILHA[k] || maiusc(destino);
 }
-/* lançamentos ainda não enviados: depois do último nº enviado (ou, na primeira vez, depois da cópia do formulário) */
-const DESDE_PADRAO = "2026-11-27"; /* a planilha oficial já tem tudo até 26/11/2026 */
-function baseEnvio(db) {
+/* uma movimentação → linhas da aba Movimentação, no mesmo padrão do app antigo:
+   [data ISO, movim, estante, PT, caixa, SKU, descrição, lote, unid (+/-), solicitante, área, OS, NF, observação]; com serial, uma linha por serial */
+function linhasXlsx(db, m) {
+  const it = db.itens.find((i) => i.id === m.itemId) || {};
+  const [est, pt, cx] = partesLocal(it.local);
+  const q = Math.abs(Number(m.qtd) || 0);
+  let movim, solic = maiusc(m.operadorNome) || "-", area, sinal = 1;
+  if (m.origem === "Cadastro") { movim = "Saldo Inicial"; solic = "CARGA INICIAL"; area = "ESTOQUE INICIAL"; }
+  else if (m.tipo === "Entrada") { movim = "Entrada"; area = "ESTOQUE"; }
+  else if (m.tipo === "Saída") { movim = "Saída"; area = areaSaida(m.destino); sinal = -1; }
+  else if (Number(m.qtd) >= 0) { movim = "Entrada"; solic = "INVENTÁRIO"; area = "ESTOQUE"; }
+  else { movim = "Saída"; solic = "INVENTÁRIO"; area = "AJUSTE DE INVENTÁRIO"; sinal = -1; }
+  const obs = [m.tipo === "Ajuste" ? "Ajuste de contagem" : "", m.obs].filter(Boolean).join(" · ");
+  const base = (lote, qq) => [diaLocal(m.dataHora), movim, numOuTexto(est), pt, numOuTexto(cx), numOuTexto(m.sku || it.sku), maiusc(m.nome || it.nome), lote || "-",
+    sinal * qq, solic, area, m.os || "0000/00", m.nf || "-", obs];
+  const lotes = separarLotes(m.lote);
+  if (lotes.length && lotes.length <= q) { const out = lotes.map((l) => base(l, 1)); if (q > lotes.length) out.push(base("-", q - lotes.length)); return out; }
+  return [base(lotes.join(", "), q)];
+}
+/* as mesmas linhas, para mostrar e copiar (data dd/mm/aaaa, unid com sinal) */
+const linhasPlanilha = (db, movs) => movs.flatMap((m) => linhasXlsx(db, m)).map((r) => [r[0] ? dataBR(r[0] + "T12:00") : "", ...r.slice(1, 8), (r[8] > 0 ? "+" : "") + String(r[8]).replace(".", ","), ...r.slice(9)]);
+const valsItem = (i) => { const [est, pt, cx] = partesLocal(i.local); return { estante: numOuTexto(est), pt, caixa: numOuTexto(cx), sku: numOuTexto(i.sku), desc: maiusc(i.nome) }; };
+/* o que ainda não está na planilha: movimentações depois do último nº enviado e itens criados aqui */
+function enviadoAte(db) {
+  if (db.planilha && db.planilha.enviadoAte != null) return db.planilha.enviadoAte;
   if (db.envio && db.envio.ate != null) return db.envio.ate;
   return Math.max(0, ...db.movs.filter((m) => /^(Formulário|Planilha)/.test(String(m.origem || ""))).map((m) => m.n || 0));
 }
-const desdeEnvio = (db) => (db.envio && db.envio.desde) || DESDE_PADRAO;
-const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : isoLocal(d).slice(0, 10); };
-const pendentesEnvio = (db) => { const b = baseEnvio(db), desde = desdeEnvio(db); return db.movs.filter((m) => (m.n || 0) > b && diaLocal(m.dataHora) >= desde); };
+const pendentesEnvio = (db) => db.movs.filter((m) => (m.n || 0) > enviadoAte(db));
+const itensNovosPlanilha = (db) => db.itens.filter((i) => !(i.naPlanilha || /^(Planilha|Formulário)/.test(String(i.origem || ""))));
+function textosDe(o, acc = []) {
+  if (o == null) return acc;
+  if (typeof o === "string") acc.push(o);
+  else if (Array.isArray(o)) o.forEach((x) => textosDe(x, acc));
+  else if (typeof o === "object") Object.values(o).forEach((x) => textosDe(x, acc));
+  return acc;
+}
+function acharTamanho(o, itemId) {
+  if (!o || typeof o !== "object") return null;
+  if (Array.isArray(o)) { for (const x of o) { const r = acharTamanho(x, itemId); if (r != null) return r; } return null; }
+  if (o.id === itemId && Number.isFinite(Number(o.size))) return Number(o.size);
+  for (const v of Object.values(o)) { const r = acharTamanho(v, itemId); if (r != null) return r; }
+  return null;
+}
+const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+function limite(promessa, ms, code) {
+  let t;
+  return Promise.race([promessa, new Promise((_, rej) => { t = setTimeout(() => rej({ code: code || "cancelled", message: "tempo esgotado" }), ms); })]).finally(() => clearTimeout(t));
+}
+/* tamanho do arquivo no SharePoint: muda quando alguém grava a planilha por fora do site */
+async function tamanhoNoSharePoint(mcp, alvo) {
+  const r = await limite(mcp.callTool("Microsoft 365", "read_resource", { uri: `file:///${alvo.driveId}/` }, { cache: false }), 30000);
+  const direto = acharTamanho(r, alvo.itemId);
+  if (direto != null) return direto;
+  const esc2 = alvo.itemId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = textosDe(r).join("\n").match(new RegExp("\\(file, (\\d+) bytes\\)\\s*file:\\/\\/\\/[^\\s]*?" + esc2));
+  return m ? Number(m[1]) : null;
+}
+async function lerMestra(cfg) {
+  if (!cfg.assetId) throw { code: "no_master" };
+  const res = await limite(fetch("/_blob/" + cfg.assetId), 30000);
+  if (!res.ok) throw { code: "no_master" };
+  const bytes = XLSX_EDIT.fromBase64((await res.text()).trim());
+  try { return await XLSX_EDIT.removeSheet(bytes, "Divergências"); } catch (_) { return bytes; }
+}
+/* monta o arquivo novo: a cópia mestra da planilha + itens novos (aba Contagem) + linhas novas (aba Movimentação) */
+async function montarPlanilha(db) {
+  const cfg = { ...ALVO_PADRAO, ...(db.planilha || {}) };
+  const pend = pendentesEnvio(db), novos = itensNovosPlanilha(db);
+  const porMov = pend.map((m) => [m.id, linhasXlsx(db, m)]);
+  const movements = porMov.flatMap(([, l]) => l);
+  const master = await lerMestra(cfg);
+  const out = await XLSX_EDIT.applyChanges(master, { items: novos.map(valsItem), movements });
+  return { cfg, pend, novos, porMov, movements, out };
+}
+/* grava no SharePoint; não marca nada no banco (quem chama marca com o resultado) */
+async function enviarParaPlanilha(db, mcp, assets, opts = {}) {
+  if (!mcp) throw { code: "no_mcp" };
+  if (!assets) throw { code: "no_assets" };
+  if (!pendentesEnvio(db).length && !itensNovosPlanilha(db).length) return null;
+  const m = await montarPlanilha(db);
+  const { cfg, out } = m;
+  if (!opts.forcar && cfg.spBytes) {
+    let agoraBytes = null;
+    try { agoraBytes = await tamanhoNoSharePoint(mcp, cfg); } catch (_) { agoraBytes = null; }
+    if (agoraBytes != null && agoraBytes !== Number(cfg.spBytes)) throw { code: "conflito", agora: agoraBytes };
+  }
+  let envio = out.bytes;
+  try { envio = await XLSX_EDIT.protegerPlanilha(out.bytes); } catch (_) { envio = out.bytes; }
+  try {
+    await limite(mcp.callTool("Microsoft 365", "sharepoint_update_file", { driveId: cfg.driveId, itemId: cfg.itemId, contentBase64: XLSX_EDIT.toBase64(envio) }, { cache: false }), 90000);
+  } catch (e) {
+    let chegou = false;
+    if (["cancelled", "server_unavailable", "upstream_error"].includes(e && e.code)) {
+      await espera(5000);
+      try { chegou = (await tamanhoNoSharePoint(mcp, cfg)) === envio.length; } catch (_) { chegou = false; }
+    }
+    if (!chegou) throw e;
+  }
+  await espera(2500);
+  let lido = null;
+  try { lido = await tamanhoNoSharePoint(mcp, cfg); } catch (_) { lido = null; }
+  const spBytes = lido != null && lido !== Number(cfg.spBytes) ? lido : envio.length;
+  const up = await assets.upload(new Blob([XLSX_EDIT.toBase64(out.bytes)], { type: "text/plain" }), { type: "text/plain" });
+  return { ...m, assetId: up.id, spBytes };
+}
+const travado = (e) => /resourceLocked|is locked|\b423\b/i.test(String((e && e.message) || "") + JSON.stringify((e && e.details) || {}));
+const semPermissao = (e) => e && e.code === "tool_error" && /FORBIDDEN|Files\.ReadWrite|accessDenied|403/.test(String(e.message || ""));
+function erroPlanilha(e) {
+  if (travado(e)) return "A planilha está aberta para edição (no Excel ou no navegador) e o SharePoint travou o arquivo. Nada se perdeu: o site tenta de novo em alguns minutos.";
+  if (semPermissao(e)) return "Sua conta não tem permissão para gravar no SharePoint (Files.ReadWrite.All). Quem libera é o TI.";
+  switch (e && e.code) {
+    case "no_mcp": return "Esta visualização não fala com o Microsoft 365. Abra o site no claude.ai, com o Microsoft 365 conectado.";
+    case "no_assets": return "Esta visualização não consegue guardar a cópia da planilha. Abra o site no claude.ai com a sua conta.";
+    case "no_master": return "A cópia da planilha guardada no site não foi encontrada. Peça ao Claude: \"recarregue a cópia da planilha no site\".";
+    case "needs_reauth": return "A conexão com o Microsoft 365 expirou. Reconecte em claude.ai › Configurações › Conectores e tente de novo.";
+    case "server_not_connected": return "O Microsoft 365 não respondeu agora. Nada se perdeu: o site tenta de novo em alguns minutos.";
+    case "approval_required": case "not_in_manifest": case "consent_required": case "not_granted": return "O site precisa da sua permissão para usar o Microsoft 365. Clique em Enviar agora e permita.";
+    case "blocked_by_policy": return "A política da organização bloqueia a gravação no SharePoint por esta página.";
+    case "server_unavailable": case "upstream_error": case "cancelled": return "O SharePoint não respondeu a tempo. Nada se perdeu: o site tenta de novo em alguns minutos.";
+    case "tool_error": return "O SharePoint recusou o arquivo: " + ((e && e.message) || "sem detalhe") + ".";
+    default: return "O envio falhou: " + ((e && e.message) || (e && e.code) || "erro desconhecido") + ".";
+  }
+}
+const REENVIAVEL = (e) => travado(e) || ["server_unavailable", "upstream_error", "cancelled", "rate_limited", "server_not_connected"].includes(e && e.code);
 
 /* ================= CSV ================= */
 function csvLinhas(texto) {
@@ -382,6 +1318,9 @@ function App() {
   const [confirmar, setConfirmar] = useState(null);
   const [downloads, setDownloads] = useState(null);
   const [mcp, setMcp] = useState(undefined);
+  const [assets, setAssets] = useState(undefined);
+  const [envioEst, setEnvioEst] = useState({ status: "", msg: "", tom: "" }); // enviando | ok | erro | parado | conflito
+  const enviandoRef = useRef(false);
   const [textoSaida, setTextoSaida] = useState(null);
   const [preMov, setPreMov] = useState(null);
 
@@ -402,14 +1341,14 @@ function App() {
       }, erro)));
       fim.push(b.doc("config/geral").onSnapshot((snap) => {
         const c = snap.exists ? snap.data() : {};
-        dbRef.current = { ...dbRef.current, seq: { mov: 0, req: 0, ...(c.seq || {}) }, integracao: { ...vazio().integracao, ...(c.integracao || {}) }, importacao: c.importacao || null, envio: c.envio || null };
+        dbRef.current = { ...dbRef.current, seq: { mov: 0, req: 0, ...(c.seq || {}) }, integracao: { ...vazio().integracao, ...(c.integracao || {}) }, importacao: c.importacao || null, envio: c.envio || null, planilha: c.planilha || null };
         setDb(dbRef.current); pronto("config", snap);
       }, erro));
     });
     return () => { clearTimeout(timer); fim.forEach((f) => f()); };
   }, []);
   useEffect(() => { const f = () => { const h = location.hash.slice(1); if (h) setAba(h); }; window.addEventListener("hashchange", f); return () => window.removeEventListener("hashchange", f); }, []);
-  useEffect(() => { usar("downloads").then(setDownloads); usar("mcp").then((m) => setMcp(m || null)); }, []);
+  useEffect(() => { usar("downloads").then(setDownloads); usar("mcp").then((m) => setMcp(m || null)); usar("assets").then((a) => setAssets(a || null)); }, []);
 
   const irPara = (a) => { setAba(a); try { history.replaceState(null, "", "#" + a); } catch (_) { location.hash = a; } window.scrollTo({ top: 0, behavior: "smooth" }); };
   const avisar = useCallback((texto, tom = "ok") => { const id = uid("t"); setToasts((t) => [...t, { id, texto, tom }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4800); }, []);
@@ -428,6 +1367,57 @@ function App() {
     return true;
   }, [avisar, substituir]);
   const mudarRef = useRef(mudar); mudarRef.current = mudar;
+
+  /* envio à planilha oficial: um aparelho por vez; o resultado vai para o banco (todos os aparelhos veem) */
+  const enviarPlanilha = useCallback(async (opts = {}) => {
+    if (enviandoRef.current) return;
+    const p0 = dbRef.current.planilha || {};
+    if (!opts.forcar && p0.enviandoEm && p0.enviandoPor !== APARELHO && Date.now() - new Date(p0.enviandoEm).getTime() < 120000) {
+      setEnvioEst({ status: "erro", msg: "Outro aparelho está enviando à planilha agora. Este tenta de novo em seguida.", tom: "warn" });
+      return;
+    }
+    enviandoRef.current = true;
+    setEnvioEst({ status: "enviando", msg: "Enviando ao SharePoint…", tom: "" });
+    mudarRef.current((d) => { d.planilha = { ...ALVO_PADRAO, ...(d.planilha || {}), enviandoEm: agora(), enviandoPor: APARELHO }; });
+    try {
+      const r = await enviarParaPlanilha(dbRef.current, mcp, assets, opts);
+      if (!r) { mudarRef.current((d) => { d.planilha = { ...(d.planilha || {}), enviandoEm: null, enviandoPor: null }; }); setEnvioEst({ status: "ok", msg: "A planilha já está em dia.", tom: "ok" }); return; }
+      mudarRef.current((d) => {
+        let k = 0;
+        const linhaDe = {};
+        for (const [id, l] of r.porMov) { linhaDe[id] = r.out.rows.slice(k, k + l.length); k += l.length; }
+        d.movs.forEach((m) => { if (linhaDe[m.id]) m.linhasPlanilha = linhaDe[m.id]; });
+        const novosIds = new Set(r.novos.map((i) => i.id));
+        d.itens.forEach((i) => { if (novosIds.has(i.id)) i.naPlanilha = true; });
+        const rows = r.out.rows;
+        d.planilha = { ...ALVO_PADRAO, ...(d.planilha || {}), assetId: r.assetId, spBytes: r.spBytes, ultimaLinha: rows.length ? rows[rows.length - 1] : (d.planilha && d.planilha.ultimaLinha) || null,
+          enviadoAte: Math.max(enviadoAte(d), ...r.pend.map((m) => m.n || 0)), sharepointEm: agora(), enviandoEm: null, enviandoPor: null };
+      });
+      const rows = r.out.rows;
+      setEnvioEst({ status: "ok", tom: "ok", msg: `Gravado no SharePoint: ${r.movements.length} linha(s)${rows.length ? ` (linha ${rows[0]}${rows.length > 1 ? " a " + rows[rows.length - 1] : ""})` : ""}${r.novos.length ? ` e ${r.novos.length} item(ns) novo(s) na Contagem` : ""}.` });
+    } catch (e) {
+      console.error("envio planilha", e);
+      mudarRef.current((d) => { d.planilha = { ...(d.planilha || {}), enviandoEm: null, enviandoPor: null }; });
+      if (e && e.code === "conflito") setEnvioEst({ status: "conflito", tom: "bad", msg: "A planilha do SharePoint foi alterada por fora do site (no Excel ou pelo app antigo) desde o último envio. Para não apagar o que foi feito lá, o site não enviou." });
+      else setEnvioEst({ status: REENVIAVEL(e) ? "erro" : "parado", tom: REENVIAVEL(e) ? "warn" : "bad", msg: erroPlanilha(e) });
+    } finally { enviandoRef.current = false; }
+  }, [mcp, assets]);
+  const nParaPlanilha = useMemo(() => pendentesEnvio(db).length + itensNovosPlanilha(db).length, [db]);
+  /* envia sozinho alguns segundos depois de cada registro; se falhou por algo passageiro, tenta de novo em 3 minutos */
+  useEffect(() => {
+    if (!nParaPlanilha || modo !== "nuvem" || !mcp || !assets || !db.planilha || !db.planilha.assetId) return;
+    if (["conflito", "parado", "enviando"].includes(envioEst.status)) return;
+    const t = setTimeout(() => enviarPlanilha(), envioEst.status === "erro" ? 180000 : 4000);
+    return () => clearTimeout(t);
+  }, [nParaPlanilha, modo, mcp, assets, envioEst.status, db.planilha && db.planilha.assetId, enviarPlanilha]);
+  const baixarPlanilha = async () => {
+    try {
+      const m = await montarPlanilha(dbRef.current);
+      const nome = (m.cfg.arquivo || "CONTROLE DE ESTOQUES 2.0.xlsx").replace(/\.xlsx$/i, "") + " (com pendentes do site).xlsx";
+      if (downloads) { try { await downloads.save({ filename: nome, data: m.out.bytes }); avisar(`${nome} salvo.`); return; } catch (e) { if (e && e.code === "declined") return avisar("Download cancelado.", "warn"); } }
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([m.out.bytes])); a.download = nome; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { avisar(erroPlanilha(e), "bad"); }
+  };
 
   const baixar = async (nome, conteudo) => {
     if (downloads) {
@@ -448,7 +1438,7 @@ function App() {
   const destinos = useMemo(() => [...new Set([...DESTINOS_BASE, ...db.movs.map((m) => m.destino).filter(Boolean), ...db.requisicoes.map((r) => r.destino).filter(Boolean)])], [db]);
   const ABAS = [["estoque", "Estoque", "Boxes"], ["movimentar", "Movimentar", "ArrowUpDown"], ["historico", "Histórico", "History"],
     ["requisicoes", "Requisições", "ClipboardList", kpi.pend], ["operadores", "Operadores", "UserCheck"], ["integracao", "Integração e backup", "PlugZap"]];
-  const ctx = { db, mudar, avisar, irPara, setConfirmar, baixar, destinos, mcp, downloads, setPreMov, preMov, modo };
+  const ctx = { db, mudar, avisar, irPara, setConfirmar, baixar, destinos, mcp, downloads, setPreMov, preMov, modo, assets, envioEst, setEnvioEst, enviarPlanilha, baixarPlanilha, nParaPlanilha };
 
   return html`
   <header class="gutter relative overflow-hidden" style=${{ background: "rgb(var(--band))", color: "rgb(var(--band-ink))", marginTop: "calc(-1 * env(safe-area-inset-top, 0px))", paddingTop: "calc(env(safe-area-inset-top, 0px) + 22px)", paddingBottom: "22px" }}>
@@ -467,6 +1457,10 @@ function App() {
               erro: ["chip-bad", "CircleX", "Banco indisponível", "Recarregue a página"],
               local: armazenamento ? ["chip-warn", "TriangleAlert", "Salvo só neste navegador", "Aberto fora do claude.ai: os dados ficam só neste navegador"] : ["chip-bad", "TriangleAlert", "Sem salvamento", "Este navegador não está guardando os dados: exporte um backup"] }[modo];
             return html`<span class=${"chip " + st[0]} title=${st[3]}><${Ic} n=${st[1]} size=${12} /> ${st[2]}</span>`; })()}
+          ${modo !== "local" ? (() => { const e = envioEst.status;
+              const st = e === "enviando" ? ["chip-plain", "RefreshCw", "Enviando à planilha…"] : e === "conflito" ? ["chip-bad", "TriangleAlert", "Planilha alterada por fora"]
+                : e === "parado" ? ["chip-bad", "TriangleAlert", "Envio à planilha parado"] : nParaPlanilha ? ["chip-warn", "FileSpreadsheet", `${nParaPlanilha} para a planilha`] : ["chip-ok", "FileSpreadsheet", "Planilha em dia"];
+              return html`<button type="button" class=${"chip " + st[0]} style=${{ border: 0, cursor: "pointer" }} title="Ver o envio à planilha oficial" onClick=${() => irPara("integracao")}><${Ic} n=${st[1]} size=${12} className=${e === "enviando" ? "animate-spin" : ""} /> ${st[2]}</button>`; })() : null}
         </div>
       </div>
       <div class="grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))" }}>
@@ -921,7 +1915,7 @@ function aoEnviarFormulario(e) {
     v("Quantidade"), v("Data e hora prevista para retirada"), v("Destino"), v("Observação")]);
 }`;
 
-function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPara, modo }) {
+function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPara, modo, assets, envioEst, setEnvioEst, enviarPlanilha, baixarPlanilha, nParaPlanilha }) {
   const [cfg, setCfg] = useState(db.integracao);
   const [estado, setEstado] = useState({ lendo: false, msg: "", tom: "", em: null });
   const [instr, setInstr] = useState(false);
@@ -991,6 +1985,8 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
   const hoje = new Date().toISOString().slice(0, 10);
   const pend = useMemo(() => pendentesEnvio(db), [db]);
   const linhasEnv = useMemo(() => linhasPlanilha(db, pend), [db, pend]);
+  const novosPl = useMemo(() => itensNovosPlanilha(db), [db]);
+  const pl = db.planilha || {};
   const exportarJson = () => baixar(`backup-almoxarifado-${hoje}.json`, JSON.stringify({ ...db, exportadoEm: agora() }, null, 2));
   const exportarItens = () => baixar(`estoque-${hoje}.csv`, paraCsv([["SKU", "Item", "Categoria", "Unidade", "Local", "Saldo", "Mínimo", "Status", "Valor unit. (R$)", "Valor total (R$)"],
     ...db.itens.map((i) => [i.sku, i.nome, i.categoria, i.unidade, i.local, String(i.qtd).replace(".", ","), String(i.minimo).replace(".", ","), statusItem(i), i.valor.toFixed(2).replace(".", ","), (i.qtd * i.valor).toFixed(2).replace(".", ",")])]));
@@ -1046,30 +2042,31 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
       </div>
     </section>
     <section class="card overflow-hidden lg:col-span-2">
-      <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="FileSpreadsheet" size=${19} /> 4. Enviar para a planilha oficial (SharePoint)</h3>
-        <p class="m-0 mt-1 text-sm text-muted">Gera as linhas no formato da aba <b>Movimentação</b> do CONTROLE DE ESTOQUES 2.0 (14 colunas, de Data a Observação). Itens com serial saem uma linha por serial, como na planilha.</p></div>
+      <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="FileSpreadsheet" size=${19} /> 4. Planilha oficial (SharePoint)</h3>
+        <p class="m-0 mt-1 text-sm text-muted">Cada entrada e saída registrada aqui é gravada sozinha na aba <b>Movimentação</b> do ${pl.arquivo || "CONTROLE DE ESTOQUES 2.0.xlsx"}, alguns segundos depois do registro, com uma linha por serial e a formatação da planilha preservada. Itens cadastrados aqui entram na aba <b>Contagem</b>.</p></div>
       <div class="p-5 flex flex-col gap-4">
-        <div class="flex flex-wrap gap-x-6 gap-y-2 items-end">
-          <div><span class="lbl block">Prontos para enviar</span><span class="font-display text-4xl font-bold num">${pend.length}</span><span class="text-sm text-muted"> lançamento(s) · ${linhasEnv.length} linha(s)</span></div>
-          <${Campo} id="env-desde" rotulo="Enviar lançamentos a partir de" dica="A planilha já tem tudo antes desta data."><input id="env-desde" type="date" class="inp" value=${desdeEnvio(db)} onChange=${(e) => e.target.value && mudar((d) => { d.envio = { ...(d.envio || {}), ate: baseEnvio(d), desde: e.target.value }; })} /><//>
-          ${db.envio && db.envio.em ? html`<span class="text-xs text-muted pb-2">Último envio marcado: ${dataHora(db.envio.em)} (até o lançamento nº ${db.envio.ate}).</span>` : null}
+        <div class="grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+          <div><span class="lbl block">Esperando envio</span><span class="font-display text-4xl font-bold num">${nParaPlanilha}</span><span class="text-sm text-muted"> ${pend.length} lançamento(s) · ${linhasEnv.length} linha(s)${novosPl.length ? ` · ${novosPl.length} item(ns) novo(s)` : ""}</span></div>
+          <div><span class="lbl block">Último envio</span><span class="font-semibold">${pl.sharepointEm ? dataHora(pl.sharepointEm) : "—"}</span></div>
+          <div><span class="lbl block">Última linha gravada</span><span class="font-semibold num">${pl.ultimaLinha || "—"}</span></div>
         </div>
+        ${!pl.assetId ? html`<p class="m-0 text-sm p-3 rounded-lg bg-warn-soft text-warn">O site ainda não tem a cópia da planilha para editar. Peça ao Claude: <i>"recarregue a cópia da planilha no site"</i>.</p>` : null}
+        ${mcp === null || assets === null ? html`<p class="m-0 text-sm p-3 rounded-lg bg-warn-soft text-warn">O envio automático só funciona com o site aberto no claude.ai, com o Microsoft 365 conectado. Aqui os registros ficam guardados e são enviados quando o site for aberto lá.</p>` : null}
+        ${envioEst.msg ? html`<p role="status" class=${"m-0 text-sm p-3 rounded-lg " + (envioEst.tom === "bad" ? "bg-bad-soft text-bad" : envioEst.tom === "ok" ? "bg-good-soft text-good" : envioEst.tom === "warn" ? "bg-warn-soft text-warn" : "bg-surface2 text-muted")}>${envioEst.msg}</p>` : null}
+        ${envioEst.status === "conflito" ? html`<div class="p-3 rounded-lg border border-line flex flex-col gap-2 text-sm">
+          <p class="m-0">Peça ao Claude: <i>"junte o que mudou na planilha com o site"</i>. Ele traz o que foi feito por fora e o envio volta a funcionar sozinho.</p>
+          <p class="m-0 text-muted">Se você tem certeza de que o que mudou por fora pode ser descartado, use Enviar mesmo assim: o arquivo do SharePoint volta a ser o do site com os registros novos (o SharePoint guarda a versão anterior no histórico).</p>
+          <div class="flex flex-wrap gap-2"><button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Enviar mesmo assim", perigo: true, botao: "Substituir a planilha",
+              texto: "O que foi gravado na planilha por fora do site desde o último envio vai sumir do arquivo (fica só no histórico de versões do SharePoint). Continuar?",
+              acao: () => { setEnvioEst({ status: "", msg: "", tom: "" }); enviarPlanilha({ forcar: true }); } })}><${Ic} n="TriangleAlert" size=${16} className="text-bad" /> Enviar mesmo assim</button></div></div>` : null}
         <div class="flex flex-wrap gap-2">
-          <button class="btn" disabled=${!linhasEnv.length} onClick=${() => copiar(linhasEnv.map((l) => l.map((c) => String(c).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n"), `${linhasEnv.length} linha(s) copiada(s). Cole na primeira linha vazia da coluna A da aba Movimentação.`)}><${Ic} n="Copy" size=${16} /> Copiar linhas para colar no Excel</button>
-          <button class="btn btn-ghost" disabled=${!linhasEnv.length} onClick=${() => baixar(`Movimentacao para a planilha ${hoje}.csv`, paraCsv([COLS_PLANILHA, ...linhasEnv]))}><${Ic} n="FileSpreadsheet" size=${16} /> Baixar CSV</button>
-          <button class="btn btn-ghost" disabled=${!pend.length} onClick=${() => setConfirmar({ titulo: "Marcar como enviados", botao: "Já colei na planilha",
-              texto: `Você colou as ${linhasEnv.length} linha(s) na aba Movimentação da planilha oficial? Depois de marcar, elas saem desta lista e não serão copiadas de novo.`,
-              acao: () => mudar((d) => { d.envio = { ...(d.envio || {}), desde: desdeEnvio(d), ate: Math.max(baseEnvio(d), ...pend.map((m) => m.n || 0)), em: agora() }; }, "Lançamentos marcados como enviados.") })}><${Ic} n="CircleCheck" size=${16} /> Marcar como enviados</button>
+          <button class="btn" disabled=${!nParaPlanilha || envioEst.status === "enviando" || envioEst.status === "conflito" || !mcp || !assets || !pl.assetId} onClick=${() => { setEnvioEst({ status: "", msg: "", tom: "" }); enviarPlanilha(); }}><${Ic} n="Send" size=${16} /> Enviar agora</button>
+          <button class="btn btn-ghost" disabled=${!pl.assetId} onClick=${baixarPlanilha} title="Baixa a planilha com os registros que ainda não foram enviados (não marca nada como enviado)"><${Ic} n="FileSpreadsheet" size=${16} /> Baixar .xlsx</button>
         </div>
         ${linhasEnv.length ? html`<div class="scroll-x border border-line rounded-lg"><table class="grid-t text-sm"><thead><tr>${COLS_PLANILHA.map((c) => html`<th key=${c}>${c}</th>`)}</tr></thead>
           <tbody>${linhasEnv.slice(0, 8).map((l, i) => html`<tr key=${i}>${l.map((c, j) => html`<td key=${j} class=${j === 8 ? "num" : ""}>${c}</td>`)}</tr>`)}</tbody></table>
           ${linhasEnv.length > 8 ? html`<p class="m-0 px-3 py-2 text-xs text-muted">…e mais ${linhasEnv.length - 8} linha(s).</p>` : null}</div>`
-          : html`<p class="m-0 text-sm text-muted">Nada novo desde ${dataBR(desdeEnvio(db) + "T12:00")}. As entradas e saídas registradas aqui a partir dessa data aparecem nesta lista.</p>`}
-        <ol class="m-0 pl-5 text-sm text-muted flex flex-col gap-1">
-          <li>Toque em <b>Copiar linhas para colar no Excel</b>.</li>
-          <li>Abra o CONTROLE DE ESTOQUES 2.0 no SharePoint, aba <b>Movimentação</b>, clique na primeira célula vazia da coluna A e cole (Ctrl+V).</li>
-          <li>Volte aqui e toque em <b>Marcar como enviados</b>. Prefere que eu faça? Peça ao Claude: <i>"passe a Gestão para o SharePoint"</i>.</li>
-        </ol>
+          : html`<p class="m-0 text-sm text-muted">Tudo o que foi registrado aqui já está na planilha.</p>`}
       </div>
     </section>
   </div>
