@@ -275,7 +275,7 @@ function linhasPlanilha(db, movs) {
 const DESDE_PADRAO = "2026-11-27"; /* a planilha oficial já tem tudo até 26/11/2026 */
 function baseEnvio(db) {
   if (db.envio && db.envio.ate != null) return db.envio.ate;
-  return Math.max(0, ...db.movs.filter((m) => String(m.origem || "").startsWith("Formulário")).map((m) => m.n || 0));
+  return Math.max(0, ...db.movs.filter((m) => /^(Formulário|Planilha)/.test(String(m.origem || ""))).map((m) => m.n || 0));
 }
 const desdeEnvio = (db) => (db.envio && db.envio.desde) || DESDE_PADRAO;
 const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : isoLocal(d).slice(0, 10); };
@@ -1034,8 +1034,8 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
           ? "Aberto fora do claude.ai: os dados ficam só neste navegador. Exporte um backup de vez em quando."
           : "Os dados ficam no banco deste app, no claude.ai: os mesmos no celular e no notebook, para quem tiver acesso ao link. Exporte um backup de vez em quando."}</p></div>
       ${db.importacao ? html`<div class="mx-5 mt-4 p-3 rounded-lg bg-info-soft text-info text-sm flex gap-2 items-start"><${Ic} n="ClipboardList" size=${16} className="mt-0.5 shrink-0" />
-        <span>Copiados do formulário <b>${db.importacao.origem}</b> em ${dataHora(db.importacao.em)}: ${db.importacao.itens} itens, ${db.importacao.operadores} operadores e ${db.importacao.movs} movimentações.
-        Para trazer o que foi lançado lá depois disso, peça ao Claude: <i>"atualize a Gestão com os dados do formulário"</i>.</span></div>` : null}
+        <span>Base copiada de <b>${db.importacao.origem}</b> em ${dataHora(db.importacao.em)}${db.importacao.ate ? ` (lançamentos até ${db.importacao.ate})` : ""}: ${db.importacao.itens} itens, ${db.importacao.operadores} operadores e ${db.importacao.movs} movimentações.
+        Para recarregar a base, peça ao Claude: <i>"use a planilha oficial como base de novo"</i>.</span></div>` : null}
       <div class="p-5 grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))" }}>
         <button class="btn" onClick=${exportarJson}><${Ic} n="FileJson" size=${16} /> Exportar backup (JSON)</button>
         <button class="btn btn-ghost" onClick=${exportarItens}><${Ic} n="FileSpreadsheet" size=${16} /> Exportar estoque (CSV)</button>
