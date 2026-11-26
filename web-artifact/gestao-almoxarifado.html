@@ -149,6 +149,11 @@ function aplicarMov(db, d, semValidar) {
     it.valor = Math.round(it.valor * 10000) / 10000;
   }
   const delta = d.tipo === "Saída" ? -q : q;
+  const lotes = separarLotes(d.lote);
+  if (lotes.length && d.tipo !== "Ajuste") {
+    const atuais = it.seriais || [];
+    it.seriais = d.tipo === "Saída" ? atuais.filter((x) => !lotes.some((l) => norm(l) === norm(x))) : [...atuais, ...lotes.filter((l) => !atuais.some((x) => norm(x) === norm(l)))];
+  }
   it.qtd = Math.round((it.qtd + delta) * 1000) / 1000;
   db.seq.mov = Math.max(db.seq.mov || 0, ...db.movs.map((x) => x.n || 0)) + 1;
   const m = {
@@ -156,7 +161,7 @@ function aplicarMov(db, d, semValidar) {
     qtd: d.tipo === "Ajuste" ? q : Math.abs(q), valorUnit: it.valor, valorTotal: Math.abs(q) * it.valor,
     destino: d.tipo === "Saída" ? String(d.destino).trim() : (d.destino || ""),
     operadorId: d.operador?.id || "", operadorNome: d.operador?.nome || "", operadorMatricula: d.operador?.matricula || "",
-    nf: d.nf || "", os: d.os || "", obs: d.obs || "", origem: d.origem || "Manual", dataHora: d.dataHora || agora(), saldoApos: it.qtd,
+    nf: d.nf || "", os: d.os || "", lote: d.lote || "", obs: d.obs || "", origem: d.origem || "Manual", dataHora: d.dataHora || agora(), saldoApos: it.qtd,
   };
   db.movs.push(m);
   return m;
@@ -201,20 +206,20 @@ const COLS = ["itens", "operadores", "movs", "requisicoes"];
 const porNome = (a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR");
 const ORDEM = { itens: porNome, operadores: porNome, movs: (a, b) => (a.n || 0) - (b.n || 0), requisicoes: (a, b) => String(a.num).localeCompare(String(b.num)) };
 function vazio() {
-  return { itens: [], operadores: [], movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false }, importacao: null };
+  return { itens: [], operadores: [], movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false }, importacao: null, envio: null };
 }
 function completar(d) {
   const v = vazio();
   return { itens: d.itens || [], operadores: d.operadores || [], movs: d.movs || [], requisicoes: d.requisicoes || [],
     seq: { mov: d.seq?.mov || (d.movs || []).length, req: d.seq?.req || (d.requisicoes || []).length },
-    integracao: { ...v.integracao, ...(d.integracao || {}) }, importacao: d.importacao || null };
+    integracao: { ...v.integracao, ...(d.integracao || {}) }, importacao: d.importacao || null, envio: d.envio || null };
 }
 function carregarLocal() {
   try { const raw = localStorage.getItem(CHAVE); if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.itens) && !d.exemplo) return completar(d); } } catch (_) {}
   return vazio();
 }
 function salvarLocal(db) { try { localStorage.setItem(CHAVE, JSON.stringify(db)); return true; } catch (_) { return false; } }
-const configDoc = (d) => ({ seq: d.seq, integracao: d.integracao, importacao: d.importacao || null });
+const configDoc = (d) => ({ seq: d.seq, integracao: d.integracao, importacao: d.importacao || null, envio: d.envio || null });
 const semId = (o) => { const { id, ...r } = o; return r; };
 /* grava no banco só o que mudou entre dois estados */
 async function gravarDiferencas(banco, antes, depois) {
@@ -236,6 +241,45 @@ function erroBanco(e) {
   if (c === "resource_exhausted") return "Muitas gravações ao mesmo tempo. Espere alguns segundos e tente de novo.";
   return "Não consegui salvar no banco agora. Confira a internet e tente de novo.";
 }
+
+/* ================= Planilha oficial (aba Movimentação, 14 colunas) ================= */
+const separarLotes = (t) => String(t || "").split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+const COLS_PLANILHA = ["Data", "Movim", "Estante", "PT", "Nº Caixa", "SKU", "DESCRIÇÃO", "Lote/ Controle", "Unid", "Solicitante / Fornecedor", "Área", "Ordem de Serviço", "Nota Fisca/DOC", "Observação"];
+function partesLocal(local) {
+  const p = String(local || "").split("·").map((x) => x.trim());
+  const est = (p.find((x) => /^estante\s/i.test(x)) || "").replace(/^estante\s+/i, "");
+  const cx = (p.find((x) => /^caixa\s/i.test(x)) || "").replace(/^caixa\s+/i, "");
+  const pt = p.find((x) => x && !/^(estante|caixa)\s/i.test(x)) || "";
+  return [est || "-", pt || "-", cx || "-"];
+}
+const dataBR = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }); };
+const maiusc = (t) => String(t || "").trim().toLocaleUpperCase("pt-BR");
+/* uma linha por movimentação; itens com serial viram uma linha por serial (+1/-1), como na planilha */
+function linhasPlanilha(db, movs) {
+  const out = [];
+  for (const m of movs) {
+    const it = db.itens.find((i) => i.id === m.itemId) || {};
+    const entra = m.tipo === "Entrada" || (m.tipo === "Ajuste" && m.qtd >= 0);
+    const q = Math.abs(m.qtd);
+    const [est, pt, cx] = partesLocal(it.local);
+    const base = (lote, qq) => [dataBR(m.dataHora), entra ? "Entrada" : "Saída", est, pt, cx, m.sku || it.sku || "-", maiusc(m.nome || it.nome), lote || "-",
+      (entra ? "+" : "-") + String(qq).replace(".", ","), maiusc(m.operadorNome) || (entra ? "-" : ""), entra ? "ESTOQUE" : maiusc(m.destino),
+      m.os || "0000/00", m.nf || "-", [m.tipo === "Ajuste" ? "Ajuste de contagem" : "", m.obs].filter(Boolean).join(" · ")];
+    const lotes = separarLotes(m.lote);
+    if (lotes.length > 1 && lotes.length === q) lotes.forEach((l) => out.push(base(l, 1)));
+    else out.push(base(lotes.join(", "), q));
+  }
+  return out;
+}
+/* lançamentos ainda não enviados: depois do último nº enviado (ou, na primeira vez, depois da cópia do formulário) */
+const DESDE_PADRAO = "2026-11-27"; /* a planilha oficial já tem tudo até 26/11/2026 */
+function baseEnvio(db) {
+  if (db.envio && db.envio.ate != null) return db.envio.ate;
+  return Math.max(0, ...db.movs.filter((m) => String(m.origem || "").startsWith("Formulário")).map((m) => m.n || 0));
+}
+const desdeEnvio = (db) => (db.envio && db.envio.desde) || DESDE_PADRAO;
+const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : isoLocal(d).slice(0, 10); };
+const pendentesEnvio = (db) => { const b = baseEnvio(db), desde = desdeEnvio(db); return db.movs.filter((m) => (m.n || 0) > b && diaLocal(m.dataHora) >= desde); };
 
 /* ================= CSV ================= */
 function csvLinhas(texto) {
@@ -358,7 +402,7 @@ function App() {
       }, erro)));
       fim.push(b.doc("config/geral").onSnapshot((snap) => {
         const c = snap.exists ? snap.data() : {};
-        dbRef.current = { ...dbRef.current, seq: { mov: 0, req: 0, ...(c.seq || {}) }, integracao: { ...vazio().integracao, ...(c.integracao || {}) }, importacao: c.importacao || null };
+        dbRef.current = { ...dbRef.current, seq: { mov: 0, req: 0, ...(c.seq || {}) }, integracao: { ...vazio().integracao, ...(c.integracao || {}) }, importacao: c.importacao || null, envio: c.envio || null };
         setDb(dbRef.current); pronto("config", snap);
       }, erro));
     });
@@ -582,7 +626,7 @@ function ItemForm({ item, db, mudar, fechar, cats }) {
 /* ================= aba: Movimentar ================= */
 function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
   const [tipo, setTipo] = useState(preMov?.tipo || "Saída");
-  const vazio = { itemId: preMov?.itemId || "", qtd: "1", destino: "", operadorId: "", os: "", nf: "", obs: "", novoValor: "", modoValor: "medio" };
+  const vazio = { itemId: preMov?.itemId || "", qtd: "1", destino: "", operadorId: "", os: "", nf: "", lote: "", obs: "", novoValor: "", modoValor: "medio" };
   const [f, setF] = useState(vazio);
   useEffect(() => { if (preMov) setPreMov(null); }, []);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -597,14 +641,17 @@ function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
     operador: tipo === "Saída" && !f.operadorId && "Escolha quem retirou.",
     valor: tipo === "Entrada" && f.novoValor.trim() && !(nv >= 0) && "Valor inválido.",
   };
+  const nLotes = separarLotes(f.lote).length;
+  erros.lote = nLotes > 1 && q > 0 && nLotes !== q ? `São ${nLotes} seriais para ${qtdFmt(q)} unidade(s): a quantidade precisa bater.` : null;
   const ok = !Object.values(erros).some(Boolean);
   const [tocado, setTocado] = useState(false);
+  const seriaisItem = (it && it.seriais) || [];
   const precoNovo = it && tipo === "Entrada" && nv >= 0 && f.novoValor.trim() ? (f.modoValor === "substituir" ? nv : (it.qtd > 0 ? (it.qtd * it.valor + q * nv) / (it.qtd + (q || 0)) : nv)) : null;
   const ultimos = db.movs.slice(-8).reverse();
   const enviar = (e) => {
     e.preventDefault(); setTocado(true); if (!ok) return;
-    const op = db.operadores.find((o) => o.id === f.operadorId);
-    const feito = mudar((d) => aplicarMov(d, { tipo, itemId: f.itemId, qtd: q, destino: f.destino, operador: op, os: f.os.trim(), nf: f.nf.trim(), obs: f.obs.trim(),
+    const op = tipo === "Saída" ? db.operadores.find((o) => o.id === f.operadorId) : null;
+    const feito = mudar((d) => aplicarMov(d, { tipo, itemId: f.itemId, qtd: q, destino: f.destino, operador: op, os: f.os.trim(), nf: f.nf.trim(), lote: separarLotes(f.lote).join(", "), obs: f.obs.trim(),
       novoValor: tipo === "Entrada" && f.novoValor.trim() ? nv : null, modoValor: f.modoValor }),
       (m) => `${tipo} registrada: ${qtdFmt(m.qtd)} ${m.unidade} de ${m.nome}. Saldo: ${qtdFmt(m.saldoApos)}.`);
     if (feito) { setF({ ...vazio, itemId: "", destino: tipo === "Saída" ? f.destino : "", operadorId: tipo === "Saída" ? f.operadorId : "" }); setTocado(false); }
@@ -633,6 +680,9 @@ function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
             <input id="mv-qtd" class="inp num" inputMode="decimal" value=${f.qtd} onInput=${set("qtd")} aria-invalid=${!!((tocado || (sai && it && q > it.qtd)) && erros.qtd)} /><//>
           <div class="field"><span class="lbl">Valor movimentado</span><div class="inp num font-semibold" style=${{ background: "rgb(var(--surface2))" }}>${brl(it && q > 0 ? q * (precoNovo ?? it.valor) : 0)}</div></div>
         </div>
+        <${Campo} id="mv-lote" rotulo="Serial / lote (opcional)" erro=${erros.lote} dica=${sai && seriaisItem.length ? `${seriaisItem.length} serial(is) em estoque. Vários: separe por vírgula.` : "Vários: separe por vírgula; vira uma linha por serial na planilha."}>
+          <input id="mv-lote" class="inp font-mono" list="lista-seriais" value=${f.lote} onInput=${set("lote")} placeholder="Y522HX5T901285D" aria-invalid=${!!erros.lote} />
+          <datalist id="lista-seriais">${(sai ? seriaisItem : []).map((x) => html`<option key=${x} value=${x} />`)}</datalist><//>
         ${sai ? html`
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <${Campo} id="mv-dest" rotulo="Destino" erro=${tocado && erros.destino} dica="Setor, obra, cliente ou centro de custo.">
@@ -645,7 +695,7 @@ function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
           ${!ativos.length ? html`<p class="m-0 text-sm text-warn">Nenhum operador ativo. <button type="button" class="underline font-semibold" onClick=${() => irPara("operadores")}>Cadastre um operador</button> antes de registrar saídas.</p>` : null}
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <${Campo} id="mv-os" rotulo="Ordem de serviço"><input id="mv-os" class="inp font-mono" value=${f.os} onInput=${set("os")} placeholder="0000/00" /><//>
-            <${Campo} id="mv-obs" rotulo="Observação"><input id="mv-obs" class="inp" value=${f.obs} onInput=${set("obs")} placeholder="Serial, motivo…" /><//>
+            <${Campo} id="mv-obs" rotulo="Observação"><input id="mv-obs" class="inp" value=${f.obs} onInput=${set("obs")} placeholder="Motivo, máquina…" /><//>
           </div>` : html`
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <${Campo} id="mv-nf" rotulo="Nota fiscal / documento"><input id="mv-nf" class="inp font-mono" value=${f.nf} onInput=${set("nf")} placeholder="123" /><//>
@@ -939,6 +989,8 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
     fr.readAsText(arq, "utf-8");
   };
   const hoje = new Date().toISOString().slice(0, 10);
+  const pend = useMemo(() => pendentesEnvio(db), [db]);
+  const linhasEnv = useMemo(() => linhasPlanilha(db, pend), [db, pend]);
   const exportarJson = () => baixar(`backup-almoxarifado-${hoje}.json`, JSON.stringify({ ...db, exportadoEm: agora() }, null, 2));
   const exportarItens = () => baixar(`estoque-${hoje}.csv`, paraCsv([["SKU", "Item", "Categoria", "Unidade", "Local", "Saldo", "Mínimo", "Status", "Valor unit. (R$)", "Valor total (R$)"],
     ...db.itens.map((i) => [i.sku, i.nome, i.categoria, i.unidade, i.local, String(i.qtd).replace(".", ","), String(i.minimo).replace(".", ","), statusItem(i), i.valor.toFixed(2).replace(".", ","), (i.qtd * i.valor).toFixed(2).replace(".", ",")])]));
@@ -991,6 +1043,33 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
         <button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Apagar todos os dados", perigo: true, botao: "Apagar tudo",
             texto: `Apagar ${db.itens.length} itens, ${db.operadores.length} operadores, ${db.movs.length} movimentações e ${db.requisicoes.length} requisições${modo === "local" ? " deste navegador" : " do banco de dados, em todos os aparelhos"}? Exporte um backup antes se quiser guardar.`,
             acao: () => { setDb({ ...vazio(), integracao: db.integracao }); avisar("Todos os dados foram apagados."); } })}><${Ic} n="Trash2" size=${16} className="text-bad" /> Apagar todos os dados</button>
+      </div>
+    </section>
+    <section class="card overflow-hidden lg:col-span-2">
+      <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="FileSpreadsheet" size=${19} /> 4. Enviar para a planilha oficial (SharePoint)</h3>
+        <p class="m-0 mt-1 text-sm text-muted">Gera as linhas no formato da aba <b>Movimentação</b> do CONTROLE DE ESTOQUES 2.0 (14 colunas, de Data a Observação). Itens com serial saem uma linha por serial, como na planilha.</p></div>
+      <div class="p-5 flex flex-col gap-4">
+        <div class="flex flex-wrap gap-x-6 gap-y-2 items-end">
+          <div><span class="lbl block">Prontos para enviar</span><span class="font-display text-4xl font-bold num">${pend.length}</span><span class="text-sm text-muted"> lançamento(s) · ${linhasEnv.length} linha(s)</span></div>
+          <${Campo} id="env-desde" rotulo="Enviar lançamentos a partir de" dica="A planilha já tem tudo antes desta data."><input id="env-desde" type="date" class="inp" value=${desdeEnvio(db)} onChange=${(e) => e.target.value && mudar((d) => { d.envio = { ...(d.envio || {}), ate: baseEnvio(d), desde: e.target.value }; })} /><//>
+          ${db.envio && db.envio.em ? html`<span class="text-xs text-muted pb-2">Último envio marcado: ${dataHora(db.envio.em)} (até o lançamento nº ${db.envio.ate}).</span>` : null}
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn" disabled=${!linhasEnv.length} onClick=${() => copiar(linhasEnv.map((l) => l.map((c) => String(c).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n"), `${linhasEnv.length} linha(s) copiada(s). Cole na primeira linha vazia da coluna A da aba Movimentação.`)}><${Ic} n="Copy" size=${16} /> Copiar linhas para colar no Excel</button>
+          <button class="btn btn-ghost" disabled=${!linhasEnv.length} onClick=${() => baixar(`Movimentacao para a planilha ${hoje}.csv`, paraCsv([COLS_PLANILHA, ...linhasEnv]))}><${Ic} n="FileSpreadsheet" size=${16} /> Baixar CSV</button>
+          <button class="btn btn-ghost" disabled=${!pend.length} onClick=${() => setConfirmar({ titulo: "Marcar como enviados", botao: "Já colei na planilha",
+              texto: `Você colou as ${linhasEnv.length} linha(s) na aba Movimentação da planilha oficial? Depois de marcar, elas saem desta lista e não serão copiadas de novo.`,
+              acao: () => mudar((d) => { d.envio = { ...(d.envio || {}), desde: desdeEnvio(d), ate: Math.max(baseEnvio(d), ...pend.map((m) => m.n || 0)), em: agora() }; }, "Lançamentos marcados como enviados.") })}><${Ic} n="CircleCheck" size=${16} /> Marcar como enviados</button>
+        </div>
+        ${linhasEnv.length ? html`<div class="scroll-x border border-line rounded-lg"><table class="grid-t text-sm"><thead><tr>${COLS_PLANILHA.map((c) => html`<th key=${c}>${c}</th>`)}</tr></thead>
+          <tbody>${linhasEnv.slice(0, 8).map((l, i) => html`<tr key=${i}>${l.map((c, j) => html`<td key=${j} class=${j === 8 ? "num" : ""}>${c}</td>`)}</tr>`)}</tbody></table>
+          ${linhasEnv.length > 8 ? html`<p class="m-0 px-3 py-2 text-xs text-muted">…e mais ${linhasEnv.length - 8} linha(s).</p>` : null}</div>`
+          : html`<p class="m-0 text-sm text-muted">Nada novo desde ${dataBR(desdeEnvio(db) + "T12:00")}. As entradas e saídas registradas aqui a partir dessa data aparecem nesta lista.</p>`}
+        <ol class="m-0 pl-5 text-sm text-muted flex flex-col gap-1">
+          <li>Toque em <b>Copiar linhas para colar no Excel</b>.</li>
+          <li>Abra o CONTROLE DE ESTOQUES 2.0 no SharePoint, aba <b>Movimentação</b>, clique na primeira célula vazia da coluna A e cole (Ctrl+V).</li>
+          <li>Volte aqui e toque em <b>Marcar como enviados</b>. Prefere que eu faça? Peça ao Claude: <i>"passe a Gestão para o SharePoint"</i>.</li>
+        </ol>
       </div>
     </section>
   </div>
