@@ -963,9 +963,11 @@ function aplicarMov(db, d, semValidar) {
   if (!(q > 0) && d.tipo !== "Ajuste") throw new Error("A quantidade precisa ser maior que zero.");
   if (d.tipo === "Saída") {
     if (!semValidar && q > it.qtd) throw new Error(`Saldo insuficiente: há ${qtdFmt(it.qtd)} ${it.unidade} de ${it.nome}.`);
-    if (!String(d.destino || "").trim()) throw new Error("Informe o destino do material.");
-    if (!d.operador) throw new Error("Escolha o operador responsável.");
-    if (d.operador.status !== "Ativo") throw new Error(`${d.operador.nome} está inativo e não pode retirar material.`);
+    if (!d.estorno) {
+      if (!String(d.destino || "").trim()) throw new Error("Informe o destino do material.");
+      if (!d.operador) throw new Error("Escolha o operador responsável.");
+      if (d.operador.status !== "Ativo") throw new Error(`${d.operador.nome} está inativo e não pode retirar material.`);
+    }
   }
   if (d.tipo === "Entrada" && d.novoValor != null && !isNaN(d.novoValor) && d.novoValor >= 0) {
     it.valor = d.modoValor === "substituir" ? d.novoValor
@@ -983,7 +985,7 @@ function aplicarMov(db, d, semValidar) {
   const m = {
     id: uid("m"), n: db.seq.mov, tipo: d.tipo, itemId: it.id, sku: it.sku, nome: it.nome, unidade: it.unidade,
     qtd: d.tipo === "Ajuste" ? q : Math.abs(q), valorUnit: it.valor, valorTotal: Math.abs(q) * it.valor,
-    destino: d.tipo === "Saída" ? String(d.destino).trim() : (d.destino || ""),
+    destino: d.tipo === "Saída" ? String(d.destino || "").trim() : (d.destino || ""),
     operadorId: d.operador?.id || "", operadorNome: d.operador?.nome || "", operadorMatricula: d.operador?.matricula || "",
     nf: d.nf || "", os: d.os || "", lote: d.lote || "", obs: d.obs || "", origem: d.origem || "Manual", dataHora: d.dataHora || agora(), saldoApos: it.qtd,
   };
@@ -1026,15 +1028,15 @@ function checarRequisicao(db, r) {
 /* ================= persistência =================
    No claude.ai: o banco de dados deste app (o mesmo no celular e no notebook).
    Aberto fora do claude.ai: fica salvo só no navegador. */
-const COLS = ["itens", "operadores", "movs", "requisicoes"];
+const COLS = ["itens", "operadores", "movs", "requisicoes", "descartes"];
 const porNome = (a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR");
-const ORDEM = { itens: porNome, operadores: porNome, movs: (a, b) => (a.n || 0) - (b.n || 0), requisicoes: (a, b) => String(a.num).localeCompare(String(b.num)) };
+const ORDEM = { itens: porNome, operadores: porNome, movs: (a, b) => (a.n || 0) - (b.n || 0), requisicoes: (a, b) => String(a.num).localeCompare(String(b.num)), descartes: (a, b) => String(a.num).localeCompare(String(b.num), "pt-BR", { numeric: true }) };
 function vazio() {
-  return { itens: [], operadores: [], movs: [], requisicoes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false }, importacao: null, envio: null, planilha: null };
+  return { itens: [], operadores: [], movs: [], requisicoes: [], descartes: [], seq: { mov: 0, req: 0 }, integracao: { planilha: "", aba: "Respostas ao formulário 1", auto: false }, importacao: null, envio: null, planilha: null };
 }
 function completar(d) {
   const v = vazio();
-  return { itens: d.itens || [], operadores: d.operadores || [], movs: d.movs || [], requisicoes: d.requisicoes || [],
+  return { itens: d.itens || [], operadores: d.operadores || [], movs: d.movs || [], requisicoes: d.requisicoes || [], descartes: d.descartes || [],
     seq: { mov: d.seq?.mov || (d.movs || []).length, req: d.seq?.req || (d.requisicoes || []).length },
     integracao: { ...v.integracao, ...(d.integracao || {}) }, importacao: d.importacao || null, envio: d.envio || null, planilha: d.planilha || null };
 }
@@ -1104,7 +1106,7 @@ function linhasXlsx(db, m) {
   else if (Number(m.qtd) >= 0) { movim = "Entrada"; solic = "INVENTÁRIO"; area = "ESTOQUE"; }
   else { movim = "Saída"; solic = "INVENTÁRIO"; area = "AJUSTE DE INVENTÁRIO"; sinal = -1; }
   const obs = [m.tipo === "Ajuste" ? "Ajuste de contagem" : "", m.obs].filter(Boolean).join(" · ");
-  const base = (lote, qq) => [diaLocal(m.dataHora), movim, numOuTexto(est), pt, numOuTexto(cx), numOuTexto(m.sku || it.sku), maiusc(m.nome || it.nome), lote || "-",
+  const base = (lote, qq) => [diaLocal(m.dataHora), movim, numOuTexto(est), pt, numOuTexto(cx), numOuTexto(it.sku || m.sku), maiusc(it.nome || m.nome), lote || "-",
     sinal * qq, solic, area, m.os || "0000/00", m.nf || "-", obs];
   const lotes = separarLotes(m.lote);
   if (lotes.length && lotes.length <= q) { const out = lotes.map((l) => base(l, 1)); if (q > lotes.length) out.push(base("-", q - lotes.length)); return out; }
@@ -1119,8 +1121,19 @@ function enviadoAte(db) {
   if (db.envio && db.envio.ate != null) return db.envio.ate;
   return Math.max(0, ...db.movs.filter((m) => /^(Formulário|Planilha)/.test(String(m.origem || ""))).map((m) => m.n || 0));
 }
-const pendentesEnvio = (db) => db.movs.filter((m) => (m.n || 0) > enviadoAte(db));
-const itensNovosPlanilha = (db) => db.itens.filter((i) => !(i.naPlanilha || /^(Planilha|Formulário)/.test(String(i.origem || ""))));
+const naPlanilha = (i) => !!(i.naPlanilha || /^(Planilha|Formulário)/.test(String(i.origem || "")));
+const pendentesEnvio = (db) => { const ate = enviadoAte(db); return db.movs.filter((m) => (m.n || 0) > ate && !m.naPlanilha); };
+const itensNovosPlanilha = (db) => db.itens.filter((i) => !naPlanilha(i));
+const cadastrosPend = (db) => db.itens.filter((i) => i.correcaoPlanilha && naPlanilha(i));
+const removerPend = (db) => (db.planilha && db.planilha.remover) || [];
+const descartesPend = (db) => (db.descartes || []).filter((d) => !d.naPlanilha);
+const contarPendencias = (db) => pendentesEnvio(db).length + itensNovosPlanilha(db).length + cadastrosPend(db).length + removerPend(db).length + descartesPend(db).length;
+const intervalo = (rs) => rs && rs.length ? (rs.length > 1 ? `${rs[0]} a ${rs[rs.length - 1]}` : `${rs[0]}`) : "";
+const nk = (x) => String(x == null ? "" : x).normalize("NFC").trim().toUpperCase();
+const chaveVals = (o) => [o.estante, o.pt, o.caixa, o.sku, o.desc].map(nk).join("|");
+const chaveLinha = (v) => [v[2], v[3], v[4], v[5], v[6]].map(nk).join("|");
+const localDe = (e, p, c) => [nk(e) && nk(e) !== "-" ? "Estante " + e : "", nk(p) && nk(p) !== "-" ? String(p) : "", nk(c) && nk(c) !== "-" ? "Caixa " + c : ""].filter(Boolean).join(" · ");
+const tituloSetor = (a) => { const t = String(a || "").trim(); return !t || t === "-" ? "" : t.charAt(0) + t.slice(1).toLocaleLowerCase("pt-BR"); };
 function textosDe(o, acc = []) {
   if (o == null) return acc;
   if (typeof o === "string") acc.push(o);
@@ -1157,27 +1170,183 @@ async function lerMestra(cfg) {
   try { return await XLSX_EDIT.removeSheet(bytes, "Divergências"); } catch (_) { return bytes; }
 }
 /* monta o arquivo novo: a cópia mestra da planilha + itens novos (aba Contagem) + linhas novas (aba Movimentação) */
-async function montarPlanilha(db) {
+async function montarPlanilha(db, masterPronto) {
   const cfg = { ...ALVO_PADRAO, ...(db.planilha || {}) };
-  const pend = pendentesEnvio(db), novos = itensNovosPlanilha(db);
+  const pend = pendentesEnvio(db), novos = itensNovosPlanilha(db), cads = cadastrosPend(db), remover = removerPend(db), descPend = descartesPend(db);
   const porMov = pend.map((m) => [m.id, linhasXlsx(db, m)]);
   const movements = porMov.flatMap(([, l]) => l);
-  const master = await lerMestra(cfg);
-  const out = await XLSX_EDIT.applyChanges(master, { items: novos.map(valsItem), movements });
-  return { cfg, pend, novos, porMov, movements, out };
+  const offs = {}; let k = 0;
+  for (const [id, l] of porMov) { offs[id] = [k, l.length]; k += l.length; }
+  const master = masterPronto || await lerMestra(cfg);
+  const baixas = {};
+  /* a aba DESCARTES é regravada inteira, com a baixa de cada descarte apontando para as linhas da Movimentação */
+  const descartes = descPend.length ? (rows) => (db.descartes || []).slice().sort(ORDEM.descartes).map((d) => {
+    let baixa = d.baixa;
+    if (!baixa) {
+      if (d.movId) {
+        const o = offs[d.movId], mv = db.movs.find((x) => x.id === d.movId);
+        const rs = o ? rows.slice(o[0], o[0] + o[1]) : (mv && mv.linhasPlanilha) || [];
+        baixa = rs.length ? "Sim, Movimentação linha " + intervalo(rs) : "Sim";
+      } else baixa = "Não (fora do estoque)";
+    }
+    baixas[d.id] = baixa;
+    return { num: d.num, data: d.data || "", sku: d.sku && d.sku !== "-" ? numOuTexto(d.sku) : "-", material: maiusc(d.material), serial: d.serial || "-", qtd: Number(d.qtd) || 0,
+      origem: d.origem || "-", motivo: maiusc(d.motivo) || "-", destino: d.destino || "-", responsavel: maiusc(d.responsavel) || "-", autorizado: maiusc(d.autorizado) || "-",
+      documento: d.documento || "-", baixa, obs: d.obs || "" };
+  }) : null;
+  const cadastros = cads.map((i) => ({ de: i.correcaoPlanilha.de, para: valsItem(i), seriais: {} }));
+  const out = await XLSX_EDIT.applyChanges(master, { items: novos.map(valsItem), movements, cadastros, remover, descartes });
+  return { cfg, pend, novos, cads, remover, descPend, porMov, offs, movements, out, baixas };
 }
-/* grava no SharePoint; não marca nada no banco (quem chama marca com o resultado) */
-async function enviarParaPlanilha(db, mcp, assets, opts = {}) {
+/* ---------- ler a aba Movimentação do SharePoint (texto) e juntar o que foi feito no Excel ---------- */
+function dataISO(t) {
+  t = String(t == null ? "" : t).trim(); let m;
+  if ((m = t.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/))) { let y = m[3] ? Number(m[3]) : new Date().getFullYear(); if (y < 100) y += 2000; return `${y}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`; }
+  if ((m = t.match(/^(\d{4})-(\d{2})-(\d{2})/))) return `${m[1]}-${m[2]}-${m[3]}`;
+  if (/^\d+(\.\d+)?$/.test(t)) return new Date(Date.UTC(1899, 11, 30) + Math.round(Number(t)) * 86400000).toISOString().slice(0, 10);
+  return "";
+}
+const numDe = (v) => Number(String(v == null ? "" : v).replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
+function movimPadrao(v) {
+  const k = semAcento(v);
+  if (k.startsWith("SAI")) return "Saída";
+  if (k.startsWith("ENT") || k.startsWith("DEVOL") || k.startsWith("RETORN")) return "Entrada";
+  if (k.startsWith("SALDO")) return "Saldo Inicial";
+  return String(v || "").trim();
+}
+function normCel(i, v) {
+  if (i === 0) return dataISO(v);
+  if (i === 8) return String(numDe(v));
+  const t = String(v == null ? "" : v).normalize("NFC").trim().toUpperCase();
+  return /^-?\d+(\.\d+)?$/.test(t) ? String(Number(t)) : t;
+}
+/* linha digitada no Excel → padrão da planilha (data, sinal da quantidade, maiúsculas, área) */
+function valoresPlanilha(v) {
+  const movim = movimPadrao(v[1]);
+  const r = [dataISO(v[0]) || isoLocal(new Date()).slice(0, 10), movim, numOuTexto(v[2]), maiusc(v[3]) || "-", numOuTexto(v[4]), numOuTexto(v[5]), maiusc(v[6]),
+    String(v[7] == null ? "" : v[7]).trim() || "-", numDe(v[8]), maiusc(v[9]) || "-", maiusc(v[10]) || "-", String(v[11] == null ? "" : v[11]).trim() || "0000/00",
+    String(v[12] == null ? "" : v[12]).trim() || "-", String(v[13] == null ? "" : v[13]).trim()];
+  const q = Math.abs(r[8]);
+  if (movim === "Saída") { r[8] = -q; r[10] = areaSaida(r[10]); }
+  else if (movim === "Entrada") { r[8] = q; r[10] = "ESTOQUE"; }
+  return r;
+}
+async function lerMovSharePoint(mcp, alvo) {
+  const r = await limite(mcp.callTool("Microsoft 365", "read_resource", { uri: `file:///${alvo.driveId}/${alvo.itemId}`, startPage: 2, endPage: 2 }, { cache: false }), 60000);
+  const txt = textosDe(r).join("\n");
+  const h = txt.match(/## Sheet: Movimenta[^\n]*\(A(\d+):[A-Z]+(\d+)\)/);
+  if (!h) throw { code: "sp_formato" };
+  let row = Number(h[1]); const ultima = Number(h[2]);
+  const corpo = txt.slice(txt.indexOf("\n", h.index) + 1).split("\n");
+  const rows = new Map(); let ultDado = 4;
+  for (const ln of corpo) {
+    if (/^Formulas/i.test(ln) || /^## /.test(ln) || /^\[(?:truncated|Sheets? |Output)/i.test(ln)) break;
+    const e = ln.match(/^\[(\d+) empty rows?\]$/); if (e) { row += Number(e[1]); continue; }
+    if (!ln.length) continue;
+    if (row >= 5) { const v = ln.split("\t"); rows.set(row, v); if (String(v[6] || "").trim()) ultDado = row; }
+    row++;
+  }
+  const lidas = row - 1;
+  return { ultima, rows, completo: lidas >= ultima || lidas - ultDado >= 3 };
+}
+/* junta na cópia do site o que foi lançado ou corrigido direto no Excel */
+async function mesclarExcel(db, master, mcp, alvo) {
+  const sp = await lerMovSharePoint(mcp, alvo);
+  if (!sp.completo) throw { code: "sp_incompleto" };
+  const mov = await XLSX_EDIT.readMovements(master);
+  const mm = new Map(mov.map((m) => [m.row, [m.data, m.movim, m.estante, m.pt, m.caixa, m.sku, m.desc, m.lote, m.unid, m.solicitante, m.area, m.os, m.nf, m.obs]]));
+  const temDado = (v) => v && v.slice(0, 14).some((x) => String(x == null ? "" : x).trim());
+  const sumiram = [...mm.keys()].filter((r) => !temDado(sp.rows.get(r)));
+  if (sumiram.length) throw { code: "sp_apagou", linhas: sumiram };
+  const editadas = [], novas = [];
+  for (const [r, v] of [...sp.rows.entries()].sort((x, y) => x[0] - y[0])) {
+    if (!temDado(v)) continue;
+    if (mm.has(r)) { const a = mm.get(r); if (!a.every((x, i) => normCel(i, x) === normCel(i, v[i]))) editadas.push([r, v]); }
+    else if (String(v[6] || "").trim()) novas.push([r, v]);
+  }
+  if (editadas.length > 60) throw { code: "sp_muitas", n: editadas.length };
+  const vEd = editadas.map(([r, v]) => ({ row: r, values: valoresPlanilha(v) }));
+  const vNovas = novas.map(([, v]) => valoresPlanilha(v));
+  let bytes = master;
+  if (vEd.length) bytes = await XLSX_EDIT.rewriteRows(bytes, vEd);
+  const conhecidas = new Set();
+  db.itens.forEach((i) => { conhecidas.add(chaveVals(valsItem(i))); if (i.correcaoPlanilha) conhecidas.add(chaveVals(i.correcaoPlanilha.de)); });
+  const itensNovos = [];
+  for (const v of vNovas) { const k = chaveLinha(v); if (!conhecidas.has(k) && !itensNovos.some((x) => x.k === k)) itensNovos.push({ k, estante: v[2], pt: v[3], caixa: v[4], sku: v[5], desc: v[6] }); }
+  let linhasNovas = [];
+  if (vNovas.length) { const out = await XLSX_EDIT.applyChanges(bytes, { items: itensNovos.map(({ k, ...x }) => x), movements: vNovas }); bytes = out.bytes; linhasNovas = out.rows; }
+  /* saldo e seriais dos itens mexidos, calculados pelas linhas da planilha */
+  const chaves = new Set([...vNovas.map(chaveLinha), ...vEd.map((x) => chaveLinha(x.values)), ...vEd.map((x) => chaveLinha(mm.get(x.row)))]);
+  const acc = {};
+  if (chaves.size) for (const l of await XLSX_EDIT.readMovements(bytes)) {
+    const k = chaveVals(l); if (!chaves.has(k)) continue;
+    const a = acc[k] || (acc[k] = { saldo: 0, ser: new Map() });
+    a.saldo += Number(l.unid) || 0;
+    const lt = String(l.lote || "").trim(); if (lt && lt !== "-") a.ser.set(lt, (a.ser.get(lt) || 0) + (Number(l.unid) || 0));
+  }
+  const saldos = Object.fromEntries(Object.entries(acc).map(([k, a]) => [k, { saldo: Math.round(a.saldo * 1000) / 1000, seriais: [...a.ser].filter(([, q]) => q > 0).map(([l]) => l) }]));
+  return { bytes, novas: vNovas.map((v, i) => ({ values: v, row: linhasNovas[i] })), editadas: vEd, itensNovos, saldos };
+}
+function motivoConflito(e) {
+  if (e.code === "sp_apagou") return `Linhas apagadas na aba Movimentação: ${e.linhas.slice(0, 8).join(", ")}${e.linhas.length > 8 ? "…" : ""}. Não apague linhas: para desfazer um lançamento, use Estornar no Histórico do site. Recupere as linhas no Excel (Ctrl+Z ou histórico de versões do SharePoint).`;
+  if (e.code === "sp_muitas") return `${e.n} linhas da aba Movimentação mudaram de uma vez (a tabela foi ordenada ou linhas foram apagadas?). Desfaça no Excel ou recupere a versão anterior no histórico do SharePoint.`;
+  if (e.code === "sp_formato") return "A aba Movimentação ou o cabeçalho dela foi renomeado ou mudou de lugar. Volte o nome da aba e os títulos das colunas como estavam.";
+  if (e.code === "sp_incompleto") return "A aba Movimentação ficou grande demais para ser lida inteira. É hora de virar o mês da planilha.";
+  return "Não deu para juntar o que foi feito no Excel.";
+}
+const resumoMescla = (m) => [m.novas.length && `${m.novas.length} lançamento(s) novo(s)`, m.editadas.length && `${m.editadas.length} linha(s) corrigida(s)`, m.itensNovos.length && `${m.itensNovos.length} item(ns) novo(s)`].filter(Boolean).join(", ");
+/* aplica no banco do site o que veio do Excel */
+function aplicarMescla(d, mx) {
+  const porChave = new Map();
+  d.itens.forEach((i) => { porChave.set(chaveVals(valsItem(i)), i); if (i.correcaoPlanilha) porChave.set(chaveVals(i.correcaoPlanilha.de), i); });
+  for (const x of mx.itensNovos) {
+    const it = { id: uid("i"), sku: String(x.sku), nome: String(x.desc), categoria: "Geral", unidade: "un", qtd: 0, minimo: 0, valor: 0, local: localDe(x.estante, x.pt, x.caixa), seriais: [], criadoEm: agora(), origem: "Planilha", naPlanilha: true, doExcel: true };
+    d.itens.push(it); porChave.set(x.k, it);
+  }
+  const opDe = (nome) => d.operadores.find((o) => maiusc(o.nome) === nome);
+  const campos = (v, it) => {
+    const tipo = v[1] === "Saída" ? "Saída" : "Entrada", q = Math.abs(Number(v[8]) || 0), op = opDe(v[9]);
+    return { tipo, qtd: q, valorUnit: it ? it.valor || 0 : 0, valorTotal: q * (it ? it.valor || 0 : 0), destino: tipo === "Saída" ? tituloSetor(v[10]) : "",
+      operadorId: op ? op.id : "", operadorNome: v[9] !== "-" && !/^(CARGA INICIAL|INVENTÁRIO)$/.test(v[9]) ? v[9] : "", operadorMatricula: op ? op.matricula : "",
+      nf: v[12] === "-" ? "" : String(v[12]), os: v[11] === "0000/00" ? "" : String(v[11]), lote: v[7] === "-" ? "" : String(v[7]), obs: v[13] || "" };
+  };
+  const criados = [];
+  for (const { values: v, row } of mx.novas) {
+    const it = porChave.get(chaveLinha(v));
+    d.seq.mov = Math.max(d.seq.mov || 0, ...d.movs.map((x) => x.n || 0)) + 1;
+    d.movs.push({ id: uid("m"), n: d.seq.mov, itemId: it ? it.id : "", sku: String(v[5]), nome: String(v[6]), unidade: it ? it.unidade : "un", ...campos(v, it),
+      origem: "Excel" + (v[1] === "Saldo Inicial" ? " · Saldo inicial" : ""), dataHora: new Date(v[0] + "T12:00:00").toISOString(), saldoApos: 0, linhasPlanilha: row ? [row] : [], naPlanilha: true });
+    criados.push(d.movs[d.movs.length - 1]);
+  }
+  for (const { row, values: v } of mx.editadas) {
+    const m = d.movs.find((x) => (x.linhasPlanilha || []).length === 1 && x.linhasPlanilha[0] === row);
+    if (m) Object.assign(m, campos(v, d.itens.find((i) => i.id === m.itemId)), { editadoNaPlanilha: agora() });
+  }
+  for (const [k, sd] of Object.entries(mx.saldos)) { const it = porChave.get(k); if (it) { it.qtd = sd.saldo; it.seriais = sd.seriais; } }
+  criados.forEach((m) => { const it = d.itens.find((i) => i.id === m.itemId); if (it) m.saldoApos = it.qtd; });
+}
+/* confere a planilha do SharePoint, junta o que foi feito no Excel e envia o que está pendente aqui; não marca nada no banco */
+async function sincronizarPlanilha(db, mcp, assets, opts = {}) {
   if (!mcp) throw { code: "no_mcp" };
   if (!assets) throw { code: "no_assets" };
-  if (!pendentesEnvio(db).length && !itensNovosPlanilha(db).length) return null;
-  const m = await montarPlanilha(db);
-  const { cfg, out } = m;
-  if (!opts.forcar && cfg.spBytes) {
-    let agoraBytes = null;
-    try { agoraBytes = await tamanhoNoSharePoint(mcp, cfg); } catch (_) { agoraBytes = null; }
-    if (agoraBytes != null && agoraBytes !== Number(cfg.spBytes)) throw { code: "conflito", agora: agoraBytes };
+  const cfg = { ...ALVO_PADRAO, ...(db.planilha || {}) };
+  const pendente = contarPendencias(db) > 0;
+  let tamanho = null;
+  try { tamanho = await tamanhoNoSharePoint(mcp, cfg); } catch (e) { if (!pendente) throw e; tamanho = null; }
+  const mudouFora = !!cfg.spBytes && tamanho != null && tamanho !== Number(cfg.spBytes);
+  if (!pendente && !mudouFora) return null;
+  let master = await lerMestra(cfg), mescla = null;
+  if (mudouFora && !opts.forcar) {
+    try { mescla = await mesclarExcel(db, master, mcp, cfg); }
+    catch (e) { if (e && /^sp_/.test(e.code || "")) throw { code: "conflito", motivo: motivoConflito(e) }; throw e; }
+    master = mescla.bytes;
   }
+  if (!pendente) {
+    const up = await assets.upload(new Blob([XLSX_EDIT.toBase64(master)], { type: "text/plain" }), { type: "text/plain" });
+    return { mescla, assetId: up.id, spBytes: tamanho, enviou: false };
+  }
+  const m = await montarPlanilha(db, master);
+  const { out } = m;
   let envio = out.bytes;
   try { envio = await XLSX_EDIT.protegerPlanilha(out.bytes); } catch (_) { envio = out.bytes; }
   try {
@@ -1193,9 +1362,9 @@ async function enviarParaPlanilha(db, mcp, assets, opts = {}) {
   await espera(2500);
   let lido = null;
   try { lido = await tamanhoNoSharePoint(mcp, cfg); } catch (_) { lido = null; }
-  const spBytes = lido != null && lido !== Number(cfg.spBytes) ? lido : envio.length;
+  const spBytes = lido != null && lido !== tamanho && lido !== Number(cfg.spBytes) ? lido : envio.length;
   const up = await assets.upload(new Blob([XLSX_EDIT.toBase64(out.bytes)], { type: "text/plain" }), { type: "text/plain" });
-  return { ...m, assetId: up.id, spBytes };
+  return { ...m, mescla, assetId: up.id, spBytes, enviou: true };
 }
 const travado = (e) => /resourceLocked|is locked|\b423\b/i.test(String((e && e.message) || "") + JSON.stringify((e && e.details) || {}));
 const semPermissao = (e) => e && e.code === "tool_error" && /FORBIDDEN|Files\.ReadWrite|accessDenied|403/.test(String(e.message || ""));
@@ -1313,7 +1482,7 @@ function App() {
   const [modo, setModo] = useState("conectando");   // conectando | nuvem | lento | local | erro
   const [carregado, setCarregado] = useState(false);
   const [armazenamento, setArmazenamento] = useState(true);
-  const [aba, setAba] = useState(() => (["estoque", "movimentar", "historico", "requisicoes", "operadores", "integracao"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "estoque"));
+  const [aba, setAba] = useState(() => (["estoque", "movimentar", "historico", "descartes", "requisicoes", "operadores", "integracao"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "estoque"));
   const [toasts, setToasts] = useState([]);
   const [confirmar, setConfirmar] = useState(null);
   const [downloads, setDownloads] = useState(null);
@@ -1368,48 +1537,82 @@ function App() {
   }, [avisar, substituir]);
   const mudarRef = useRef(mudar); mudarRef.current = mudar;
 
-  /* envio à planilha oficial: um aparelho por vez; o resultado vai para o banco (todos os aparelhos veem) */
+  /* planilha oficial: um aparelho por vez; junta o que foi feito no Excel e envia o que está pendente; o resultado vai para o banco */
+  const envioRef = useRef(envioEst); envioRef.current = envioEst;
   const enviarPlanilha = useCallback(async (opts = {}) => {
     if (enviandoRef.current) return;
+    if (opts.silencioso && envioRef.current.status === "parado") return;
     const p0 = dbRef.current.planilha || {};
+    if (!p0.assetId) return;
     if (!opts.forcar && p0.enviandoEm && p0.enviandoPor !== APARELHO && Date.now() - new Date(p0.enviandoEm).getTime() < 120000) {
-      setEnvioEst({ status: "erro", msg: "Outro aparelho está enviando à planilha agora. Este tenta de novo em seguida.", tom: "warn" });
+      if (!opts.silencioso) setEnvioEst({ status: "erro", msg: "Outro aparelho está enviando à planilha agora. Este tenta de novo em seguida.", tom: "warn" });
       return;
     }
+    const pendente = contarPendencias(dbRef.current) > 0;
     enviandoRef.current = true;
-    setEnvioEst({ status: "enviando", msg: "Enviando ao SharePoint…", tom: "" });
-    mudarRef.current((d) => { d.planilha = { ...ALVO_PADRAO, ...(d.planilha || {}), enviandoEm: agora(), enviandoPor: APARELHO }; });
+    if (pendente || !opts.silencioso) setEnvioEst({ status: "enviando", msg: pendente ? "Enviando ao SharePoint…" : "Conferindo a planilha…", tom: "" });
+    if (pendente) mudarRef.current((d) => { d.planilha = { ...ALVO_PADRAO, ...(d.planilha || {}), enviandoEm: agora(), enviandoPor: APARELHO }; });
     try {
-      const r = await enviarParaPlanilha(dbRef.current, mcp, assets, opts);
-      if (!r) { mudarRef.current((d) => { d.planilha = { ...(d.planilha || {}), enviandoEm: null, enviandoPor: null }; }); setEnvioEst({ status: "ok", msg: "A planilha já está em dia.", tom: "ok" }); return; }
+      const r = await sincronizarPlanilha(dbRef.current, mcp, assets, opts);
+      if (!r) {
+        if (pendente) mudarRef.current((d) => { d.planilha = { ...(d.planilha || {}), enviandoEm: null, enviandoPor: null }; });
+        setEnvioEst((e) => (!opts.silencioso || e.status === "erro" || e.status === "enviando" || e.status === "conflito") ? { status: "ok", msg: opts.silencioso ? "" : "A planilha já está em dia.", tom: "ok" } : e);
+        return;
+      }
       mudarRef.current((d) => {
-        let k = 0;
-        const linhaDe = {};
-        for (const [id, l] of r.porMov) { linhaDe[id] = r.out.rows.slice(k, k + l.length); k += l.length; }
-        d.movs.forEach((m) => { if (linhaDe[m.id]) m.linhasPlanilha = linhaDe[m.id]; });
-        const novosIds = new Set(r.novos.map((i) => i.id));
-        d.itens.forEach((i) => { if (novosIds.has(i.id)) i.naPlanilha = true; });
-        const rows = r.out.rows;
-        d.planilha = { ...ALVO_PADRAO, ...(d.planilha || {}), assetId: r.assetId, spBytes: r.spBytes, ultimaLinha: rows.length ? rows[rows.length - 1] : (d.planilha && d.planilha.ultimaLinha) || null,
-          enviadoAte: Math.max(enviadoAte(d), ...r.pend.map((m) => m.n || 0)), sharepointEm: agora(), enviandoEm: null, enviandoPor: null };
+        if (r.mescla) aplicarMescla(d, r.mescla);
+        const p = { ...ALVO_PADRAO, ...(d.planilha || {}), assetId: r.assetId, spBytes: r.spBytes, lidoEm: agora(), enviandoEm: null, enviandoPor: null };
+        if (r.enviou) {
+          const rows = r.out.rows, linhaDe = {};
+          for (const [id, [k, n]] of Object.entries(r.offs)) linhaDe[id] = rows.slice(k, k + n);
+          d.movs.forEach((m) => { if (linhaDe[m.id]) m.linhasPlanilha = linhaDe[m.id]; });
+          const novosIds = new Set(r.novos.map((i) => i.id)), cadIds = new Set(r.cads.map((i) => i.id));
+          d.itens.forEach((i) => { if (novosIds.has(i.id)) i.naPlanilha = true; if (cadIds.has(i.id)) delete i.correcaoPlanilha; });
+          const descIds = new Set(r.descPend.map((x) => x.id));
+          (d.descartes || []).forEach((x) => { if (r.baixas[x.id]) x.baixa = r.baixas[x.id]; if (descIds.has(x.id)) x.naPlanilha = true; });
+          const enviados = new Set(r.remover.map(chaveVals));
+          p.remover = (p.remover || []).filter((x) => !enviados.has(chaveVals(x)));
+          p.enviadoAte = Math.max(enviadoAte(d), ...r.pend.map((m) => m.n || 0));
+          p.ultimaLinha = rows.length ? rows[rows.length - 1] : p.ultimaLinha || null;
+          p.sharepointEm = agora();
+        }
+        d.planilha = p;
       });
-      const rows = r.out.rows;
-      setEnvioEst({ status: "ok", tom: "ok", msg: `Gravado no SharePoint: ${r.movements.length} linha(s)${rows.length ? ` (linha ${rows[0]}${rows.length > 1 ? " a " + rows[rows.length - 1] : ""})` : ""}${r.novos.length ? ` e ${r.novos.length} item(ns) novo(s) na Contagem` : ""}.` });
+      const partes = [];
+      if (r.mescla) { const t = resumoMescla(r.mescla); if (t) partes.push("Trouxe do Excel: " + t + "."); if (r.mescla.itensNovos.length) partes.push("Confira os itens novos que vieram do Excel: podem ser erro de digitação."); }
+      if (r.enviou) {
+        const rows = r.out.rows, o = [];
+        if (r.movements.length) o.push(`${r.movements.length} linha(s) na Movimentação (${intervalo(rows)})`);
+        if (r.novos.length) o.push(`${r.novos.length} item(ns) novo(s) na Contagem`);
+        if (r.cads.length) o.push(`${r.cads.length} correção(ões) de cadastro`);
+        if (r.remover.length) o.push(`${r.remover.length} item(ns) tirado(s) da Contagem`);
+        if (r.descPend.length) o.push(`${r.descPend.length} descarte(s)`);
+        partes.unshift("Gravado no SharePoint: " + o.join(", ") + ".");
+      }
+      setEnvioEst({ status: "ok", tom: "ok", msg: partes.join(" ") });
     } catch (e) {
       console.error("envio planilha", e);
-      mudarRef.current((d) => { d.planilha = { ...(d.planilha || {}), enviandoEm: null, enviandoPor: null }; });
-      if (e && e.code === "conflito") setEnvioEst({ status: "conflito", tom: "bad", msg: "A planilha do SharePoint foi alterada por fora do site (no Excel ou pelo app antigo) desde o último envio. Para não apagar o que foi feito lá, o site não enviou." });
-      else setEnvioEst({ status: REENVIAVEL(e) ? "erro" : "parado", tom: REENVIAVEL(e) ? "warn" : "bad", msg: erroPlanilha(e) });
+      if (pendente) mudarRef.current((d) => { d.planilha = { ...(d.planilha || {}), enviandoEm: null, enviandoPor: null }; });
+      if (e && e.code === "conflito") setEnvioEst({ status: "conflito", tom: "bad", msg: "A planilha foi mexida no Excel de um jeito que o site não consegue juntar sozinho: " + e.motivo + " Enquanto isso, o site guarda os registros e não envia, para não apagar nada." });
+      else if (!opts.silencioso || pendente) setEnvioEst({ status: REENVIAVEL(e) ? "erro" : "parado", tom: REENVIAVEL(e) ? "warn" : "bad", msg: erroPlanilha(e) });
     } finally { enviandoRef.current = false; }
   }, [mcp, assets]);
-  const nParaPlanilha = useMemo(() => pendentesEnvio(db).length + itensNovosPlanilha(db).length, [db]);
+  const nParaPlanilha = useMemo(() => contarPendencias(db), [db]);
+  const temMestra = !!(db.planilha && db.planilha.assetId);
   /* envia sozinho alguns segundos depois de cada registro; se falhou por algo passageiro, tenta de novo em 3 minutos */
   useEffect(() => {
-    if (!nParaPlanilha || modo !== "nuvem" || !mcp || !assets || !db.planilha || !db.planilha.assetId) return;
+    if (!nParaPlanilha || modo !== "nuvem" || !mcp || !assets || !temMestra) return;
     if (["conflito", "parado", "enviando"].includes(envioEst.status)) return;
     const t = setTimeout(() => enviarPlanilha(), envioEst.status === "erro" ? 180000 : 4000);
     return () => clearTimeout(t);
-  }, [nParaPlanilha, modo, mcp, assets, envioEst.status, db.planilha && db.planilha.assetId, enviarPlanilha]);
+  }, [nParaPlanilha, modo, mcp, assets, envioEst.status, temMestra, enviarPlanilha]);
+  /* confere a planilha ao abrir e a cada 5 minutos: o que for lançado no Excel aparece aqui */
+  useEffect(() => {
+    if (modo !== "nuvem" || !mcp || !assets || !temMestra) return;
+    const t0 = setTimeout(() => enviarPlanilha({ silencioso: true }), 6000);
+    const t = setInterval(() => { if (!document.hidden) enviarPlanilha({ silencioso: true }); }, 300000);
+    return () => { clearTimeout(t0); clearInterval(t); };
+  }, [modo, mcp, assets, temMestra, enviarPlanilha]);
   const baixarPlanilha = async () => {
     try {
       const m = await montarPlanilha(dbRef.current);
@@ -1436,7 +1639,7 @@ function App() {
   }, [db]);
 
   const destinos = useMemo(() => [...new Set([...DESTINOS_BASE, ...db.movs.map((m) => m.destino).filter(Boolean), ...db.requisicoes.map((r) => r.destino).filter(Boolean)])], [db]);
-  const ABAS = [["estoque", "Estoque", "Boxes"], ["movimentar", "Movimentar", "ArrowUpDown"], ["historico", "Histórico", "History"],
+  const ABAS = [["estoque", "Estoque", "Boxes"], ["movimentar", "Movimentar", "ArrowUpDown"], ["historico", "Histórico", "History"], ["descartes", "Descartes", "Recycle"],
     ["requisicoes", "Requisições", "ClipboardList", kpi.pend], ["operadores", "Operadores", "UserCheck"], ["integracao", "Integração e backup", "PlugZap"]];
   const ctx = { db, mudar, avisar, irPara, setConfirmar, baixar, destinos, mcp, downloads, setPreMov, preMov, modo, assets, envioEst, setEnvioEst, enviarPlanilha, baixarPlanilha, nParaPlanilha };
 
@@ -1448,7 +1651,7 @@ function App() {
         <div class="flex items-center gap-3">
           <span class="grid place-items-center w-11 h-11 rounded-lg stripe shrink-0"><span class="grid place-items-center w-8 h-8 rounded-md bg-accent text-[#1b232a]"><${Ic} n="Package" size=${20} /></span></span>
           <div><h1 class="font-display text-3xl font-bold leading-none m-0">Gestão do Almoxarifado</h1>
-          <p class="m-0 mt-1 text-sm" style=${{ color: "rgb(var(--band-muted))" }}>Estoque, entradas e saídas com destino e operador, e requisições vindas do formulário.</p></div>
+          <p class="m-0 mt-1 text-sm" style=${{ color: "rgb(var(--band-muted))" }}>Estoque, entradas, saídas e descartes, gravados sozinhos na planilha oficial do SharePoint.</p></div>
         </div>
         <div class="flex flex-wrap gap-2 items-center">
           ${(() => { const st = { nuvem: ["chip-ok", "Database", "Banco de dados na nuvem", "Salvo no banco deste app: o mesmo no celular e no notebook"],
@@ -1483,6 +1686,7 @@ function App() {
       ${carregado && aba === "estoque" ? html`<${Estoque} ...${ctx} />` : null}
       ${carregado && aba === "movimentar" ? html`<${Movimentar} ...${ctx} />` : null}
       ${carregado && aba === "historico" ? html`<${Historico} ...${ctx} />` : null}
+      ${carregado && aba === "descartes" ? html`<${Descartes} ...${ctx} />` : null}
       ${carregado && aba === "requisicoes" ? html`<${Requisicoes} ...${ctx} />` : null}
       ${carregado && aba === "operadores" ? html`<${Operadores} ...${ctx} />` : null}
       ${carregado && aba === "integracao" ? html`<${Integracao} ...${ctx} setDb=${substituir} />` : null}
@@ -1503,7 +1707,7 @@ function App() {
 }
 
 /* ================= aba: Estoque ================= */
-function Estoque({ db, mudar, setConfirmar, irPara, setPreMov }) {
+function Estoque({ db, mudar, setConfirmar, irPara, setPreMov, avisar }) {
   const [busca, setBusca] = useState("");
   const [cat, setCat] = useState("");
   const [st, setSt] = useState("");
@@ -1519,9 +1723,16 @@ function Estoque({ db, mudar, setConfirmar, irPara, setPreMov }) {
     return l.sort(f[ordem]);
   }, [db.itens, busca, cat, st, ordem]);
   const totalFiltro = lista.reduce((s, i) => s + i.qtd * i.valor, 0);
-  const excluir = (it) => setConfirmar({ titulo: "Excluir item", perigo: true, botao: "Excluir item",
-    texto: `Excluir ${it.nome} (${it.sku})? O histórico de movimentações dele continua guardado.`,
-    acao: () => mudar((d) => { d.itens = d.itens.filter((x) => x.id !== it.id); }, `${it.nome} excluído.`) });
+  const excluir = (it) => {
+    const pl = naPlanilha(it);
+    if (pl && Math.abs(Number(it.qtd) || 0) > 0) return avisar(`${it.nome} ainda tem ${qtdFmt(it.qtd)} ${it.unidade} no estoque. Zere o saldo (saída, descarte ou ajuste de contagem) antes de excluir.`, "warn");
+    setConfirmar({ titulo: "Excluir item", perigo: true, botao: "Excluir item",
+      texto: pl ? `Excluir ${it.nome} (${it.sku})? Ele sai também da aba Contagem da planilha. As linhas dele na Movimentação continuam lá, como histórico.` : `Excluir ${it.nome} (${it.sku})? O histórico de movimentações dele continua guardado.`,
+      acao: () => mudar((d) => {
+        if (pl) { const p = d.planilha || {}; d.planilha = { ...ALVO_PADRAO, ...p, remover: [...(p.remover || []), it.correcaoPlanilha ? it.correcaoPlanilha.de : valsItem(it)] }; }
+        d.itens = d.itens.filter((x) => x.id !== it.id);
+      }, `${it.nome} excluído.`) });
+  };
   const contagem = (s) => db.itens.filter((i) => statusItem(i) === s).length;
   const semValor = db.itens.filter((i) => !(i.valor > 0)).length;
 
@@ -1589,7 +1800,14 @@ function ItemForm({ item, db, mudar, fechar, cats }) {
         d.itens.push(it);
         if (v.qtd > 0) aplicarMov(d, { tipo: "Entrada", itemId: it.id, qtd: v.qtd, origem: "Cadastro", obs: "Saldo inicial" });
       } else {
-        const it = d.itens.find((x) => x.id === item.id); Object.assign(it, dados);
+        const it = d.itens.find((x) => x.id === item.id);
+        const antes = valsItem(it), eraPlanilha = naPlanilha(it);
+        Object.assign(it, dados);
+        /* nome, SKU ou local mudou num item que já está na planilha: a correção vai junto no próximo envio */
+        if (eraPlanilha) {
+          const de = it.correcaoPlanilha ? it.correcaoPlanilha.de : antes;
+          if (chaveVals(de) !== chaveVals(valsItem(it))) it.correcaoPlanilha = { de, em: agora() }; else delete it.correcaoPlanilha;
+        }
         if (f.qtd !== "" && v.qtd !== it.qtd) {
           const delta = Math.round((v.qtd - it.qtd) * 1000) / 1000;
           aplicarMov(d, { tipo: "Ajuste", itemId: it.id, qtd: delta, origem: "Contagem", obs: f.obs.trim() || `Ajuste de contagem: ${qtdFmt(it.qtd)} → ${qtdFmt(v.qtd)}` });
@@ -1717,7 +1935,21 @@ function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
 }
 
 /* ================= aba: Histórico ================= */
-function Historico({ db, baixar }) {
+function Historico({ db, baixar, mudar, setConfirmar }) {
+  const [limiteLinhas, setLimiteLinhas] = useState(200);
+  const ateEnvio = enviadoAte(db);
+  const estornar = (m) => setConfirmar({ titulo: "Estornar lançamento", botao: "Estornar",
+    texto: `Estornar o lançamento nº ${m.n} (${m.tipo} de ${qtdFmt(m.qtd)} ${m.unidade} de ${m.nome})? É registrado o movimento contrário${m.linhasPlanilha && m.linhasPlanilha.length ? `, que vira uma linha nova na planilha (a linha ${intervalo(m.linhasPlanilha)} continua lá, como histórico)` : ""}. O saldo volta ao que era.`,
+    acao: () => mudar((d) => {
+      const o = d.movs.find((x) => x.id === m.id);
+      if (!o || o.estornadoPor) throw new Error("Esse lançamento já foi estornado.");
+      const op = d.operadores.find((x) => x.id === o.operadorId) || null;
+      const novo = aplicarMov(d, { tipo: o.tipo === "Saída" ? "Entrada" : "Saída", itemId: o.itemId, qtd: o.qtd, destino: o.tipo === "Saída" ? "" : "Ajuste de inventário", operador: op,
+        lote: o.lote || "", nf: o.nf || "", os: o.os || "", estorno: true, origem: "Estorno",
+        obs: `Estorno do lançamento nº ${o.n}${o.linhasPlanilha && o.linhasPlanilha.length ? ` (linha ${intervalo(o.linhasPlanilha)} da planilha)` : ""}` });
+      novo.estornoDe = o.id; o.estornadoPor = novo.id;
+      return novo;
+    }, (n) => `Estorno registrado (nº ${n.n}).`) });
   const [f, setF] = useState({ busca: "", tipo: "", destino: "", operador: "", de: "", ate: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const destinos = useMemo(() => [...new Set(db.movs.map((m) => m.destino).filter(Boolean))].sort(), [db.movs]);
@@ -1752,8 +1984,8 @@ function Historico({ db, baixar }) {
   </section>
   <section class="card overflow-hidden">
     ${lista.length ? html`<div class="scroll-x" style=${{ maxHeight: "70vh" }}><table class="grid-t">
-      <thead><tr><th>#</th><th>Data/hora</th><th>Tipo</th><th>Item</th><th class="r">Qtd</th><th class="r">Valor</th><th>Destino</th><th>Operador</th><th>Doc.</th><th>Origem</th><th class="r">Saldo após</th></tr></thead>
-      <tbody>${lista.map((m) => html`<tr key=${m.id}>
+      <thead><tr><th>#</th><th>Data/hora</th><th>Tipo</th><th>Item</th><th class="r">Qtd</th><th class="r">Valor</th><th>Destino</th><th>Operador</th><th>Doc.</th><th>Origem</th><th class="r">Saldo após</th><th>Planilha</th><th></th></tr></thead>
+      <tbody>${lista.slice(0, limiteLinhas).map((m) => html`<tr key=${m.id}>
         <td class="num text-muted">${m.n}</td><td class="num text-sm whitespace-nowrap">${dataHora(m.dataHora)}</td>
         <td><span class=${"chip " + (m.tipo === "Saída" ? "chip-bad" : m.tipo === "Entrada" ? "chip-ok" : "chip-info")}>${m.tipo}</span></td>
         <td><div class="font-semibold">${m.nome}</div><div class="text-xs text-muted font-mono">${m.sku}${m.obs ? html`<span class="font-sans"> · ${m.obs}</span>` : null}</div></td>
@@ -1762,9 +1994,98 @@ function Historico({ db, baixar }) {
         <td>${m.destino || html`<span class="text-muted">—</span>`}</td>
         <td>${m.operadorNome ? html`${m.operadorNome}<div class="text-xs text-muted font-mono">${m.operadorMatricula}</div>` : html`<span class="text-muted">—</span>`}</td>
         <td class="text-sm font-mono">${[m.nf && "NF " + m.nf, m.os && "OS " + m.os].filter(Boolean).join(" · ") || html`<span class="text-muted font-sans">—</span>`}</td>
-        <td class="text-sm">${m.origem}</td><td class="r num">${qtdFmt(m.saldoApos)}</td></tr>`)}</tbody></table></div>`
+        <td class="text-sm">${m.origem}${m.estornadoPor ? html`<div><span class="chip chip-warn">Estornado</span></div>` : null}</td><td class="r num">${qtdFmt(m.saldoApos)}</td>
+        <td class="text-sm whitespace-nowrap">${m.linhasPlanilha && m.linhasPlanilha.length ? `linha ${intervalo(m.linhasPlanilha)}` : (m.n || 0) > ateEnvio && !m.naPlanilha ? html`<span class="chip chip-warn">Aguardando</span>` : html`<span class="text-muted">—</span>`}</td>
+        <td>${m.tipo !== "Ajuste" && !m.estornadoPor && !m.estornoDe && !/^Descarte/.test(String(m.origem || "")) ? html`<button class="btn btn-ghost btn-sm" title="Registrar o movimento contrário" aria-label=${"Estornar lançamento " + m.n} onClick=${() => estornar(m)}><${Ic} n="Undo2" size=${14} /> Estornar</button>` : null}</td></tr>`)}</tbody></table>
+      ${lista.length > limiteLinhas ? html`<div class="p-3 text-center border-t border-line"><button class="btn btn-ghost" onClick=${() => setLimiteLinhas(limiteLinhas + 300)}>Mostrar mais (${lista.length - limiteLinhas} restantes)</button></div>` : null}</div>`
     : html`<${Vazio} icone="History" texto="Nenhuma movimentação com esses filtros." />`}
   </section>`;
+}
+
+/* ================= aba: Descartes (aba DESCARTES da planilha) ================= */
+const DESTINOS_DESCARTE = ["Lixo eletrônico", "Descarte", "Devolução ao fornecedor", "Doação", "Reciclagem"];
+function Descartes({ db, mudar, setConfirmar }) {
+  const hoje = isoLocal(new Date()).slice(0, 10);
+  const inicial = { modo: "estoque", itemId: "", material: "", qtd: "1", seriais: "", motivo: "", destino: "Lixo eletrônico", responsavelId: "", autorizado: "", documento: "", obs: "", data: hoje };
+  const [f, setF] = useState(inicial);
+  const [tocado, setTocado] = useState(false);
+  const [busca, setBusca] = useState("");
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const ativos = db.operadores.filter((o) => o.status === "Ativo");
+  const estoque = f.modo === "estoque";
+  const it = estoque ? db.itens.find((i) => i.id === f.itemId) : null;
+  const q = num(f.qtd), lotes = separarLotes(f.seriais);
+  const erros = {
+    item: estoque && !it && "Escolha o item.",
+    material: !estoque && !f.material.trim() && "Descreva o material.",
+    qtd: !(q > 0) ? "Informe a quantidade." : estoque && it && q > it.qtd ? `Saldo insuficiente: há ${qtdFmt(it.qtd)} ${it.unidade}.` : lotes.length > 1 && lotes.length !== q ? `São ${lotes.length} seriais para ${qtdFmt(q)} unidade(s).` : null,
+    motivo: !f.motivo.trim() && "Informe o motivo.",
+    responsavel: estoque && !f.responsavelId && "Escolha quem tirou do estoque.",
+  };
+  const ok = !Object.values(erros).some(Boolean);
+  const porItem = useMemo(() => { const g = {}; db.itens.filter((i) => i.qtd > 0).forEach((i) => (g[i.categoria] = g[i.categoria] || []).push(i)); return Object.entries(g).sort(); }, [db.itens]);
+  const salvar = (e) => {
+    e.preventDefault(); setTocado(true); if (!ok) return;
+    const op = db.operadores.find((o) => o.id === f.responsavelId) || null;
+    const feito = mudar((d) => {
+      const num = "D-" + String(Math.max(0, ...(d.descartes || []).map((x) => Number(String(x.num).replace(/\D/g, "")) || 0)) + 1).padStart(4, "0");
+      let movId = null;
+      if (estoque) {
+        const m = aplicarMov(d, { tipo: "Saída", itemId: it.id, qtd: q, destino: "Descarte", operador: op, lote: lotes.join(", "), origem: "Descarte " + num, obs: `Descarte ${num}: ${f.motivo.trim()}` });
+        movId = m.id;
+      }
+      d.descartes = d.descartes || [];
+      d.descartes.push({ id: uid("d"), num, data: f.data || hoje, sku: it ? it.sku : "-", material: it ? it.nome : f.material.trim().toUpperCase(), serial: lotes.join(", "), qtd: q,
+        origem: it ? it.local : "", motivo: f.motivo.trim(), destino: f.destino, responsavel: op ? op.nome : "", autorizado: f.autorizado.trim(), documento: f.documento.trim(), obs: f.obs.trim(), movId, criadoEm: agora() });
+      return num;
+    }, (num) => `Descarte ${num} registrado${estoque ? " e baixado do estoque" : ""}.`);
+    if (feito) { setF({ ...inicial, modo: f.modo, destino: f.destino, responsavelId: f.responsavelId, autorizado: f.autorizado }); setTocado(false); }
+  };
+  const lista = useMemo(() => { const t = norm(busca); return (db.descartes || []).filter((x) => !t || [x.num, x.material, x.serial, x.motivo, x.sku, x.responsavel].some((y) => norm(y).includes(t))).slice().sort(ORDEM.descartes).reverse(); }, [db.descartes, busca]);
+  const baixaTxt = (x) => x.baixa || (x.movId ? "Sim (vai junto no envio)" : "Não (fora do estoque)");
+  return html`
+  <section><p class="lbl m-0" style=${{ color: "rgb(var(--accent-ink))" }}>Operação</p><h2 class="font-display text-3xl font-bold m-0">Descartes</h2>
+    <p class="m-0 mt-1 text-sm text-muted max-w-3xl">Material com defeito que sai de vez. Do estoque: dá baixa no item (uma saída com destino Descarte). Fora do estoque: só registra (sucata da manutenção, por exemplo). Tudo vai para a aba DESCARTES da planilha.</p></section>
+  <div class="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)] items-start">
+    <form class="card overflow-hidden" onSubmit=${salvar} noValidate>
+      <div class="p-4 border-b border-line"><div class="grid grid-cols-2 gap-1.5 p-1.5 rounded-xl bg-surface2 border border-line" role="group" aria-label="Origem do material">
+        ${[["estoque", "Do estoque"], ["fora", "Fora do estoque"]].map(([k, t]) => html`<button type="button" key=${k} aria-pressed=${f.modo === k} onClick=${() => { setF({ ...f, modo: k }); setTocado(false); }}
+          class=${"py-2.5 rounded-lg font-display font-bold uppercase tracking-wider " + (f.modo === k ? "btn-out" : "bg-transparent text-muted hover:text-ink")} style=${{ border: 0 }}>${t}</button>`)}</div></div>
+      <div class="p-5 flex flex-col gap-4">
+        ${estoque ? html`<${Campo} id="ds-item" rotulo="Item" erro=${tocado && erros.item}>
+          <select id="ds-item" class="inp" value=${f.itemId} onChange=${set("itemId")}><option value="">Escolha o item…</option>
+            ${porItem.map(([c, its]) => html`<optgroup key=${c} label=${c}>${its.map((i) => html`<option key=${i.id} value=${i.id}>${i.sku} · ${i.nome} — saldo ${qtdFmt(i.qtd)}${i.local ? " · " + i.local : ""}</option>`)}</optgroup>`)}</select><//>`
+        : html`<${Campo} id="ds-mat" rotulo="Material" erro=${tocado && erros.material}><input id="ds-mat" class="inp" value=${f.material} onInput=${set("material")} placeholder="Fontes queimadas" /><//>`}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <${Campo} id="ds-qtd" rotulo="Quantidade" erro=${(tocado || (it && q > it.qtd)) && erros.qtd}><input id="ds-qtd" class="inp num" inputMode="decimal" value=${f.qtd} onInput=${set("qtd")} /><//>
+          <${Campo} id="ds-data" rotulo="Data"><input id="ds-data" class="inp" type="date" value=${f.data} onInput=${set("data")} /><//>
+        </div>
+        <${Campo} id="ds-ser" rotulo="Serial / lote (opcional)" dica="Vários: separe por vírgula.">
+          <input id="ds-ser" class="inp font-mono" list="ds-lista-ser" value=${f.seriais} onInput=${set("seriais")} />
+          <datalist id="ds-lista-ser">${(it ? it.seriais || [] : []).map((x) => html`<option key=${x} value=${x} />`)}</datalist><//>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <${Campo} id="ds-mot" rotulo="Motivo" erro=${tocado && erros.motivo}><input id="ds-mot" class="inp" value=${f.motivo} onInput=${set("motivo")} placeholder="Tela quebrada" /><//>
+          <${Campo} id="ds-dest" rotulo="Destino"><select id="ds-dest" class="inp" value=${f.destino} onChange=${set("destino")}>${DESTINOS_DESCARTE.map((x) => html`<option key=${x}>${x}</option>`)}</select><//>
+          <${Campo} id="ds-resp" rotulo=${estoque ? "Responsável" : "Responsável (opcional)"} erro=${tocado && erros.responsavel}><select id="ds-resp" class="inp" value=${f.responsavelId} onChange=${set("responsavelId")}><option value="">Quem?</option>${ativos.map((o) => html`<option key=${o.id} value=${o.id}>${o.nome}</option>`)}</select><//>
+          <${Campo} id="ds-aut" rotulo="Autorizado por"><input id="ds-aut" class="inp" value=${f.autorizado} onInput=${set("autorizado")} placeholder="Nome" /><//>
+          <${Campo} id="ds-doc" rotulo="Documento / laudo"><input id="ds-doc" class="inp" value=${f.documento} onInput=${set("documento")} /><//>
+          <${Campo} id="ds-obs" rotulo="Observação"><input id="ds-obs" class="inp" value=${f.obs} onInput=${set("obs")} /><//>
+        </div>
+      </div>
+      <div class="px-5 py-3 border-t border-line bg-surface2 flex justify-end"><button class="btn btn-out w-full sm:w-auto" disabled=${tocado && !ok}><${Ic} n="Recycle" size=${17} /> Registrar descarte</button></div>
+    </form>
+    <section class="card overflow-hidden">
+      <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-line"><h3 class="font-display text-lg font-bold uppercase tracking-wide m-0">${(db.descartes || []).length} descarte(s)</h3>
+        <input class="inp" style=${{ maxWidth: "220px" }} type="search" aria-label="Procurar descarte" placeholder="Procurar" value=${busca} onInput=${(e) => setBusca(e.target.value)} /></div>
+      ${lista.length ? html`<div class="scroll-x" style=${{ maxHeight: "70vh" }}><table class="grid-t text-sm"><thead><tr><th>Nº</th><th>Data</th><th>Material</th><th class="r">Qtd</th><th>Motivo / destino</th><th>Responsável</th><th>Baixa no estoque</th></tr></thead>
+        <tbody>${lista.map((x) => html`<tr key=${x.id}><td class="font-mono whitespace-nowrap">${x.num}${x.naPlanilha ? null : html`<div><span class="chip chip-warn">Aguardando</span></div>`}</td>
+          <td class="whitespace-nowrap">${x.data ? dataBR(x.data + "T12:00") : "—"}</td>
+          <td><div class="font-semibold">${x.material}</div><div class="text-xs text-muted font-mono">${[x.sku && x.sku !== "-" ? x.sku : "", x.serial].filter(Boolean).join(" · ")}</div></td>
+          <td class="r num">${qtdFmt(x.qtd)}</td><td>${x.motivo || "—"}<div class="text-xs text-muted">${x.destino || ""}</div></td>
+          <td>${x.responsavel || "—"}${x.autorizado ? html`<div class="text-xs text-muted">Autorizado: ${x.autorizado}</div>` : null}</td><td class="text-xs">${baixaTxt(x)}</td></tr>`)}</tbody></table></div>`
+      : html`<${Vazio} icone="Recycle" texto="Nenhum descarte registrado." />`}
+    </section>
+  </div>`;
 }
 
 /* ================= aba: Requisições ================= */
@@ -2038,29 +2359,29 @@ function Integracao({ db, mudar, avisar, baixar, setConfirmar, mcp, setDb, irPar
         <label class="btn btn-ghost cursor-pointer relative"><${Ic} n="Upload" size=${16} /> Importar backup (JSON)<input type="file" accept=".json,application/json" style=${{ position: "absolute", width: 1, height: 1, opacity: 0 }} onChange=${(e) => lerArquivo(e, "json")} /></label>
         <button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Apagar todos os dados", perigo: true, botao: "Apagar tudo",
             texto: `Apagar ${db.itens.length} itens, ${db.operadores.length} operadores, ${db.movs.length} movimentações e ${db.requisicoes.length} requisições${modo === "local" ? " deste navegador" : " do banco de dados, em todos os aparelhos"}? Exporte um backup antes se quiser guardar.`,
-            acao: () => { setDb({ ...vazio(), integracao: db.integracao }); avisar("Todos os dados foram apagados."); } })}><${Ic} n="Trash2" size=${16} className="text-bad" /> Apagar todos os dados</button>
+            acao: () => { setDb({ ...vazio(), integracao: db.integracao, planilha: db.planilha }); avisar("Todos os dados foram apagados."); } })}><${Ic} n="Trash2" size=${16} className="text-bad" /> Apagar todos os dados</button>
       </div>
     </section>
     <section class="card overflow-hidden lg:col-span-2">
       <div class="px-5 py-4 border-b border-line"><h3 class="font-display text-xl font-bold uppercase tracking-wide m-0 flex items-center gap-2"><${Ic} n="FileSpreadsheet" size=${19} /> 4. Planilha oficial (SharePoint)</h3>
-        <p class="m-0 mt-1 text-sm text-muted">Cada entrada e saída registrada aqui é gravada sozinha na aba <b>Movimentação</b> do ${pl.arquivo || "CONTROLE DE ESTOQUES 2.0.xlsx"}, alguns segundos depois do registro, com uma linha por serial e a formatação da planilha preservada. Itens cadastrados aqui entram na aba <b>Contagem</b>.</p></div>
+        <p class="m-0 mt-1 text-sm text-muted">Cada entrada e saída registrada aqui é gravada sozinha na aba <b>Movimentação</b> do ${pl.arquivo || "CONTROLE DE ESTOQUES 2.0.xlsx"}, alguns segundos depois do registro, com uma linha por serial e a formatação da planilha preservada. Itens novos, correções de item e exclusões vão para a aba <b>Contagem</b>, e os descartes para a aba <b>DESCARTES</b>. A cada 5 minutos (e ao abrir) o site também confere a planilha: o que for lançado ou corrigido direto no Excel aparece aqui.</p></div>
       <div class="p-5 flex flex-col gap-4">
         <div class="grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
-          <div><span class="lbl block">Esperando envio</span><span class="font-display text-4xl font-bold num">${nParaPlanilha}</span><span class="text-sm text-muted"> ${pend.length} lançamento(s) · ${linhasEnv.length} linha(s)${novosPl.length ? ` · ${novosPl.length} item(ns) novo(s)` : ""}</span></div>
-          <div><span class="lbl block">Último envio</span><span class="font-semibold">${pl.sharepointEm ? dataHora(pl.sharepointEm) : "—"}</span></div>
+          <div><span class="lbl block">Esperando envio</span><span class="font-display text-4xl font-bold num">${nParaPlanilha}</span><span class="text-sm text-muted"> ${[`${pend.length} lançamento(s) · ${linhasEnv.length} linha(s)`, novosPl.length && `${novosPl.length} item(ns) novo(s)`, cadastrosPend(db).length && `${cadastrosPend(db).length} correção(ões) de item`, removerPend(db).length && `${removerPend(db).length} exclusão(ões)`, descartesPend(db).length && `${descartesPend(db).length} descarte(s)`].filter(Boolean).join(" · ")}</span></div>
+          <div><span class="lbl block">Último envio</span><span class="font-semibold">${pl.sharepointEm ? dataHora(pl.sharepointEm) : "—"}</span>${pl.lidoEm ? html`<span class="block text-xs text-muted">Conferida em ${dataHora(pl.lidoEm)}</span>` : null}</div>
           <div><span class="lbl block">Última linha gravada</span><span class="font-semibold num">${pl.ultimaLinha || "—"}</span></div>
         </div>
         ${!pl.assetId ? html`<p class="m-0 text-sm p-3 rounded-lg bg-warn-soft text-warn">O site ainda não tem a cópia da planilha para editar. Peça ao Claude: <i>"recarregue a cópia da planilha no site"</i>.</p>` : null}
         ${mcp === null || assets === null ? html`<p class="m-0 text-sm p-3 rounded-lg bg-warn-soft text-warn">O envio automático só funciona com o site aberto no claude.ai, com o Microsoft 365 conectado. Aqui os registros ficam guardados e são enviados quando o site for aberto lá.</p>` : null}
         ${envioEst.msg ? html`<p role="status" class=${"m-0 text-sm p-3 rounded-lg " + (envioEst.tom === "bad" ? "bg-bad-soft text-bad" : envioEst.tom === "ok" ? "bg-good-soft text-good" : envioEst.tom === "warn" ? "bg-warn-soft text-warn" : "bg-surface2 text-muted")}>${envioEst.msg}</p>` : null}
         ${envioEst.status === "conflito" ? html`<div class="p-3 rounded-lg border border-line flex flex-col gap-2 text-sm">
-          <p class="m-0">Peça ao Claude: <i>"junte o que mudou na planilha com o site"</i>. Ele traz o que foi feito por fora e o envio volta a funcionar sozinho.</p>
+          <p class="m-0">Corrija no Excel o que o aviso aponta e toque em <b>Conferir de novo</b>. Se precisar, peça ao Claude: <i>"junte o que mudou na planilha com o site"</i>.</p>
           <p class="m-0 text-muted">Se você tem certeza de que o que mudou por fora pode ser descartado, use Enviar mesmo assim: o arquivo do SharePoint volta a ser o do site com os registros novos (o SharePoint guarda a versão anterior no histórico).</p>
-          <div class="flex flex-wrap gap-2"><button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Enviar mesmo assim", perigo: true, botao: "Substituir a planilha",
+          <div class="flex flex-wrap gap-2"><button class="btn" onClick=${() => { setEnvioEst({ status: "", msg: "", tom: "" }); enviarPlanilha(); }}><${Ic} n="RefreshCw" size=${16} /> Conferir de novo</button><button class="btn btn-ghost" onClick=${() => setConfirmar({ titulo: "Enviar mesmo assim", perigo: true, botao: "Substituir a planilha",
               texto: "O que foi gravado na planilha por fora do site desde o último envio vai sumir do arquivo (fica só no histórico de versões do SharePoint). Continuar?",
               acao: () => { setEnvioEst({ status: "", msg: "", tom: "" }); enviarPlanilha({ forcar: true }); } })}><${Ic} n="TriangleAlert" size=${16} className="text-bad" /> Enviar mesmo assim</button></div></div>` : null}
         <div class="flex flex-wrap gap-2">
-          <button class="btn" disabled=${!nParaPlanilha || envioEst.status === "enviando" || envioEst.status === "conflito" || !mcp || !assets || !pl.assetId} onClick=${() => { setEnvioEst({ status: "", msg: "", tom: "" }); enviarPlanilha(); }}><${Ic} n="Send" size=${16} /> Enviar agora</button>
+          <button class="btn" disabled=${envioEst.status === "enviando" || envioEst.status === "conflito" || !mcp || !assets || !pl.assetId} onClick=${() => { setEnvioEst({ status: "", msg: "", tom: "" }); enviarPlanilha(); }}><${Ic} n=${nParaPlanilha ? "Send" : "RefreshCw"} size=${16} /> ${nParaPlanilha ? "Enviar agora" : "Conferir a planilha agora"}</button>
           <button class="btn btn-ghost" disabled=${!pl.assetId} onClick=${baixarPlanilha} title="Baixa a planilha com os registros que ainda não foram enviados (não marca nada como enviado)"><${Ic} n="FileSpreadsheet" size=${16} /> Baixar .xlsx</button>
         </div>
         ${linhasEnv.length ? html`<div class="scroll-x border border-line rounded-lg"><table class="grid-t text-sm"><thead><tr>${COLS_PLANILHA.map((c) => html`<th key=${c}>${c}</th>`)}</tr></thead>
