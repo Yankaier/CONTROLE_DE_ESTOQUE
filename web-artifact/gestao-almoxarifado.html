@@ -47,7 +47,7 @@ h1, h2, h3 { text-wrap: balance; }
 .stripe { background: repeating-linear-gradient(-45deg, rgb(var(--accent)) 0 8px, rgb(27 35 42) 8px 16px); }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .lbl { font-size: .72rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--muted)); }
-.inp { width: 100%; min-width: 0; font: inherit; color: rgb(var(--ink)); background: rgb(var(--surface)); border: 1px solid rgb(var(--line2)); border-radius: 8px; padding: 8px 11px; }
+.inp { box-sizing: border-box; width: 100%; min-width: 0; font: inherit; color: rgb(var(--ink)); background: rgb(var(--surface)); border: 1px solid rgb(var(--line2)); border-radius: 8px; padding: 8px 11px; }
 .inp:focus { outline: none; border-color: rgb(var(--accent)); box-shadow: 0 0 0 3px rgb(var(--accent) / .3); }
 .inp[aria-invalid="true"] { border-color: rgb(var(--bad)); }
 textarea.inp { min-height: 64px; resize: vertical; }
@@ -86,6 +86,20 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 pre.code { font-family: var(--f-mono); font-size: .78rem; line-height: 1.55; background: rgb(var(--surface2)); border: 1px solid rgb(var(--line)); border-radius: 8px; padding: 12px; overflow-x: auto; white-space: pre; }
 :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* celular: barra de abas embaixo, ao alcance do polegar; botão de registrar sempre visível */
+.bottomnav { display: none; }
+@media (max-width: 639px) {
+  .navbar { display: none; }
+  .bottomnav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: rgb(var(--surface)); border-top: 1px solid rgb(var(--line)); padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); box-shadow: 0 -6px 20px rgb(0 0 0 / .08); }
+  .bottomnav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 8px 2px 7px; font-family: var(--f-display); font-weight: 700; font-size: .7rem; line-height: 1.1; letter-spacing: .04em; text-transform: uppercase; color: rgb(var(--muted)); background: transparent; border: 0; min-height: 58px; position: relative; cursor: pointer; }
+  .bottomnav button[aria-current="page"] { color: rgb(var(--ink)); }
+  .bottomnav button[aria-current="page"]::before { content: ""; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; background: rgb(var(--accent)); border-radius: 0 0 3px 3px; }
+  .bottomnav .badge { position: absolute; top: 4px; right: calc(50% - 22px); }
+  .com-bottomnav { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)) !important; }
+  .acao-fixa { position: sticky; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); z-index: 5; box-shadow: 0 -6px 16px rgb(0 0 0 / .06); }
+  .toasts { bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important; }
+  .inp { font-size: 16px; } /* menos de 16px faz o iPhone dar zoom ao tocar no campo */
+}
 </style>
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <script>
@@ -1463,6 +1477,51 @@ function Campo({ id, rotulo, dica, erro, children }) {
   return html`<div class="field"><label class="lbl" for=${id}>${rotulo}</label>${children}
     ${erro ? html`<span class="text-xs font-semibold text-bad">${erro}</span>` : dica ? html`<span class="text-xs text-muted">${dica}</span>` : null}</div>`;
 }
+/* escolher item procurando por nome, SKU, serial ou estante (bom no celular: nada de lista gigante) */
+function EscolherItem({ id, itens, valor, onEscolher, erro, rotulo = "Item", soComSaldo }) {
+  const [busca, setBusca] = useState("");
+  const [trocando, setTrocando] = useState(false);
+  const it = itens.find((i) => i.id === valor);
+  const lista = useMemo(() => {
+    const base = soComSaldo ? itens.filter((i) => i.qtd > 0) : itens;
+    const palavras = norm(busca).trim().split(/\s+/).filter(Boolean);
+    if (!palavras.length) return base.slice(0, 40);
+    return base.filter((i) => { const alvo = norm([i.nome, i.sku, i.local, i.categoria, ...(i.seriais || [])].join(" ")); return palavras.every((w) => alvo.includes(w)); }).slice(0, 40);
+  }, [busca, itens, soComSaldo]);
+  if (it && !trocando) return html`<div class="field"><span class="lbl">${rotulo}</span>
+    <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-line bg-surface2">
+      <div class="min-w-0"><div class="font-semibold">${it.nome}</div><div class="text-xs text-muted"><span class="font-mono">${it.sku}</span>${it.local ? " · " + it.local : ""}</div></div>
+      <button type="button" class="btn btn-ghost btn-sm shrink-0" onClick=${() => { setTrocando(true); setBusca(""); }}>Trocar</button></div></div>`;
+  return html`<${Campo} id=${id} rotulo=${rotulo} erro=${erro}>
+    <input id=${id} class="inp" type="search" autocomplete="off" enterkeyhint="search" value=${busca} onInput=${(e) => setBusca(e.target.value)} placeholder="Procure por nome, SKU, serial ou estante" />
+    <div class="border border-line rounded-lg overflow-y-auto bg-surface" style=${{ maxHeight: "min(300px, 45vh)" }} role="listbox" aria-label="Itens encontrados">
+      ${lista.length ? lista.map((i) => html`<button type="button" role="option" aria-selected=${i.id === valor} key=${i.id} class="w-full text-left px-3 py-2.5 bg-transparent hover:bg-surface2 flex items-center justify-between gap-3 cursor-pointer"
+          style=${{ border: 0, borderBottom: "1px solid rgb(var(--line))", minHeight: "52px" }} onClick=${() => { onEscolher(i.id); setTrocando(false); setBusca(""); }}>
+          <span class="min-w-0"><span class="block font-semibold truncate">${i.nome}</span><span class="block text-xs text-muted truncate"><span class="font-mono">${i.sku}</span>${i.local ? " · " + i.local : ""}</span></span>
+          <span class="num text-sm shrink-0">${qtdFmt(i.qtd)} <span class="text-muted">${i.unidade}</span></span></button>`)
+        : html`<p class="m-0 p-3 text-sm text-muted">Nenhum item encontrado.</p>`}
+    </div>
+    ${!busca && (soComSaldo ? itens.filter((i) => i.qtd > 0).length : itens.length) > 40 ? html`<span class="text-xs text-muted">Mostrando os 40 primeiros. Digite para procurar.</span>` : null}<//>`;
+}
+/* quantidade com botões − e + (dedo grande no celular) */
+function Quantidade({ id, valor, onMudar, invalido }) {
+  const passo = (d) => onMudar(String(Math.max(1, Math.round(((num(valor) || 0) + d) * 1000) / 1000)));
+  return html`<div class="flex items-stretch gap-1.5">
+    <button type="button" class="btn btn-ghost" style=${{ minWidth: "48px", fontSize: "1.3rem" }} aria-label="Diminuir" onClick=${() => passo(-1)}>−</button>
+    <input id=${id} class="inp num text-center" inputMode="decimal" value=${valor} onInput=${(e) => onMudar(e.target.value)} aria-invalid=${!!invalido} />
+    <button type="button" class="btn btn-ghost" style=${{ minWidth: "48px", fontSize: "1.3rem" }} aria-label="Aumentar" onClick=${() => passo(1)}>+</button></div>`;
+}
+/* seriais do item em botões: toque para marcar os que estão saindo */
+function EscolherSeriais({ seriais, valor, onMudar }) {
+  const marcados = separarLotes(valor);
+  if (!seriais.length) return null;
+  const alternar = (x) => { const n = marcados.includes(x) ? marcados.filter((y) => y !== x) : [...marcados, x]; onMudar(n.join(", "), n.length); };
+  return html`<div class="field"><span class="lbl">Seriais em estoque · toque para marcar (${marcados.length} de ${seriais.length})</span>
+    <div class="flex flex-wrap gap-1.5 overflow-y-auto p-1" style=${{ maxHeight: "180px" }}>
+      ${seriais.map((x) => { const on = marcados.includes(x); return html`<button type="button" key=${x} aria-pressed=${on} onClick=${() => alternar(x)}
+        class=${"chip " + (on ? "chip-info" : "chip-plain")} style=${{ cursor: "pointer", fontFamily: "var(--f-mono)", textTransform: "none", letterSpacing: 0, fontSize: ".82rem", padding: "7px 11px", border: on ? "1px solid rgb(var(--info))" : undefined }}>${on ? "✓ " : ""}${x}</button>`; })}
+    </div></div>`;
+}
 function Vazio({ icone = "Inbox", texto, children }) {
   return html`<div class="flex flex-col items-center gap-2 py-10 px-4 text-center text-muted"><${Ic} n=${icone} size=${28} /><p class="m-0 max-w-md">${texto}</p>${children}</div>`;
 }
@@ -1492,6 +1551,9 @@ function App() {
   const enviandoRef = useRef(false);
   const [textoSaida, setTextoSaida] = useState(null);
   const [preMov, setPreMov] = useState(null);
+  const [celular, setCelular] = useState(() => window.matchMedia("(max-width: 639px)").matches);
+  const [maisAberto, setMaisAberto] = useState(false);
+  useEffect(() => { const mq = window.matchMedia("(max-width: 639px)"); const f = () => setCelular(mq.matches); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); }, []);
 
   /* liga no banco de dados uma vez; sem banco (fora do claude.ai), usa o navegador */
   useEffect(() => {
@@ -1644,14 +1706,14 @@ function App() {
   const ctx = { db, mudar, avisar, irPara, setConfirmar, baixar, destinos, mcp, downloads, setPreMov, preMov, modo, assets, envioEst, setEnvioEst, enviarPlanilha, baixarPlanilha, nParaPlanilha };
 
   return html`
-  <header class="gutter relative overflow-hidden" style=${{ background: "rgb(var(--band))", color: "rgb(var(--band-ink))", marginTop: "calc(-1 * env(safe-area-inset-top, 0px))", paddingTop: "calc(env(safe-area-inset-top, 0px) + 22px)", paddingBottom: "22px" }}>
+  <header class="gutter relative overflow-hidden" style=${{ background: "rgb(var(--band))", color: "rgb(var(--band-ink))", marginTop: "calc(-1 * env(safe-area-inset-top, 0px))", paddingTop: `calc(env(safe-area-inset-top, 0px) + ${celular ? 14 : 22}px)`, paddingBottom: celular ? "14px" : "22px" }}>
     <div class="absolute right-0 top-0 bottom-0 w-3 stripe" aria-hidden="true"></div>
     <div class="max-w-7xl mx-auto flex flex-col gap-4 pr-4">
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div class="flex items-center gap-3">
           <span class="grid place-items-center w-11 h-11 rounded-lg stripe shrink-0"><span class="grid place-items-center w-8 h-8 rounded-md bg-accent text-[#1b232a]"><${Ic} n="Package" size=${20} /></span></span>
-          <div><h1 class="font-display text-3xl font-bold leading-none m-0">Gestão do Almoxarifado</h1>
-          <p class="m-0 mt-1 text-sm" style=${{ color: "rgb(var(--band-muted))" }}>Estoque, entradas, saídas e descartes, gravados sozinhos na planilha oficial do SharePoint.</p></div>
+          <div><h1 class="font-display text-2xl sm:text-3xl font-bold leading-none m-0">Gestão do Almoxarifado</h1>
+          <p class="m-0 mt-1 text-sm hidden sm:block" style=${{ color: "rgb(var(--band-muted))" }}>Estoque, entradas, saídas e descartes, gravados sozinhos na planilha oficial do SharePoint.</p></div>
         </div>
         <div class="flex flex-wrap gap-2 items-center">
           ${(() => { const st = { nuvem: ["chip-ok", "Database", "Banco de dados na nuvem", "Salvo no banco deste app: o mesmo no celular e no notebook"],
@@ -1666,12 +1728,12 @@ function App() {
               return html`<button type="button" class=${"chip " + st[0]} style=${{ border: 0, cursor: "pointer" }} title="Ver o envio à planilha oficial" onClick=${() => irPara("integracao")}><${Ic} n=${st[1]} size=${12} className=${e === "enviando" ? "animate-spin" : ""} /> ${st[2]}</button>`; })() : null}
         </div>
       </div>
-      <div class="grid gap-3" style=${{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))" }}>
+      ${!celular || aba === "estoque" ? html`<div class="grid gap-3" style=${{ gridTemplateColumns: celular ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fit, minmax(min(100%, 160px), 1fr))" }}>
         <${Kpi} icone="Banknote" valor=${brl(kpi.valor)} rotulo="Valor total em estoque" tom="accent" onClick=${() => irPara("estoque")} />
         <${Kpi} icone="Boxes" valor=${db.itens.length} rotulo="Itens cadastrados" sub=${qtdFmt(kpi.unidades) + " unidades"} tom="info" onClick=${() => irPara("estoque")} />
         <${Kpi} icone="TriangleAlert" valor=${kpi.baixo + kpi.esg} rotulo="Alertas de estoque" sub=${`${kpi.baixo} baixo · ${kpi.esg} esgotado`} tom=${kpi.baixo + kpi.esg ? "warn" : "ok"} onClick=${() => irPara("estoque")} />
         <${Kpi} icone="ClipboardList" valor=${kpi.pend} rotulo="Requisições pendentes" tom=${kpi.pend ? "bad" : "ok"} onClick=${() => irPara("requisicoes")} />
-      </div>
+      </div>` : null}
     </div>
   </header>
   <nav class="navbar gutter" aria-label="Áreas">
@@ -1680,7 +1742,7 @@ function App() {
         <${Ic} n=${ic} size=${17} />${n}${b ? html`<span class="badge">${b}</span>` : null}</a>`)}
     </div>
   </nav>
-  <main class="gutter" style=${{ paddingBlock: "24px 56px" }}>
+  <main class="gutter com-bottomnav" style=${{ paddingBlock: celular ? "16px 56px" : "24px 56px" }}>
     <div class="max-w-7xl mx-auto flex flex-col gap-5">
       ${!carregado ? html`<div class="card"><${Vazio} icone="Database" texto="Carregando o estoque do banco de dados…" /></div>` : null}
       ${carregado && aba === "estoque" ? html`<${Estoque} ...${ctx} />` : null}
@@ -1702,6 +1764,15 @@ function App() {
       <textarea class="inp font-mono text-xs" style=${{ minHeight: 280 }} readonly id="saida-texto" value=${textoSaida.conteudo}></textarea>
       <div class="flex justify-end"><button class="btn" onClick=${() => { const el = document.getElementById("saida-texto"); navigator.clipboard?.writeText(textoSaida.conteudo).then(() => avisar("Copiado.")).catch(() => { el.select(); avisar("Texto selecionado: use Ctrl+C.", "warn"); }); }}><${Ic} n="Copy" size=${16} /> Copiar</button></div>
     <//>` : null}
+  <nav class="bottomnav" aria-label="Áreas">
+    ${[["estoque", "Estoque", "Boxes"], ["movimentar", "Lançar", "ArrowUpDown"], ["historico", "Histórico", "History"], ["descartes", "Descartes", "Recycle"]].map(([k, n, ic]) => html`<button type="button" key=${k} aria-current=${aba === k ? "page" : undefined} onClick=${() => irPara(k)}><${Ic} n=${ic} size=${21} />${n}</button>`)}
+    <button type="button" aria-current=${["requisicoes", "operadores", "integracao"].includes(aba) ? "page" : undefined} onClick=${() => setMaisAberto(true)}><${Ic} n="Menu" size=${21} />Mais${kpi.pend || nParaPlanilha ? html`<span class="badge">${kpi.pend + nParaPlanilha}</span>` : null}</button>
+  </nav>
+  ${maisAberto ? html`<${Modal} titulo="Mais" onClose=${() => setMaisAberto(false)}>
+    <div class="flex flex-col gap-2">
+      ${[["requisicoes", "Requisições", "ClipboardList", kpi.pend ? `${kpi.pend} pendente(s)` : ""], ["operadores", "Operadores", "UserCheck", ""], ["integracao", "Planilha, integração e backup", "PlugZap", nParaPlanilha ? `${nParaPlanilha} para a planilha` : "Planilha em dia"]].map(([k, n, ic, sub]) => html`
+        <button type="button" key=${k} class="btn btn-ghost justify-start" style=${{ minHeight: "54px" }} onClick=${() => { setMaisAberto(false); irPara(k); }}><${Ic} n=${ic} size=${19} /> <span class="flex-1 text-left">${n}</span>${sub ? html`<span class="text-xs text-muted normal-case tracking-normal font-sans">${sub}</span>` : null}</button>`)}
+    </div><//>` : null}
   <div class="toasts" aria-live="polite">${toasts.map((t) => html`<div key=${t.id} class=${"card shadow-xl px-4 py-3 flex gap-2 items-start text-sm font-medium " + (t.tom === "bad" ? "text-bad" : t.tom === "warn" ? "text-warn" : "text-good")} style=${{ borderLeft: "4px solid currentColor" }}>
     <${Ic} n=${t.tom === "bad" ? "CircleX" : t.tom === "warn" ? "TriangleAlert" : "CircleCheck"} size=${18} /><span class="text-ink">${t.texto}</span></div>`)}</div>`;
 }
@@ -1879,20 +1950,17 @@ function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
           class=${"flex items-center justify-center gap-2 py-2.5 rounded-lg font-display font-bold uppercase tracking-wider text-[1.05rem] " + (tipo === t ? (t === "Saída" ? "btn-out" : "btn-in") : "bg-transparent text-muted hover:text-ink")}
           style=${{ border: 0 }}><${Ic} n=${t === "Saída" ? "ArrowUpFromLine" : "ArrowDownToLine"} size=${18} /> ${t}</button>`)}</div></div>
       <div class="p-5 flex flex-col gap-4">
-        <${Campo} id="mv-item" rotulo="Item" erro=${tocado && erros.item}>
-          <select id="mv-item" class="inp" value=${f.itemId} onChange=${set("itemId")} aria-invalid=${!!(tocado && erros.item)}>
-            <option value="">Escolha o item…</option>
-            ${porCat.map(([c, its]) => html`<optgroup key=${c} label=${c}>${its.map((i) => html`<option key=${i.id} value=${i.id}>${i.sku} · ${i.nome} — saldo ${qtdFmt(i.qtd)} ${i.unidade}</option>`)}</optgroup>`)}
-          </select><//>
+        <${EscolherItem} id="mv-item" itens=${db.itens} valor=${f.itemId} onEscolher=${(id) => setF({ ...f, itemId: id, lote: "" })} erro=${tocado && erros.item} soComSaldo=${sai} />
         ${it ? html`<div class="flex flex-wrap gap-x-5 gap-y-1 text-sm p-3 rounded-lg bg-surface2 border border-line">
           <span>Saldo: <b class="num">${qtdFmt(it.qtd)} ${it.unidade}</b></span><span>Valor unit.: <b class="num">${brl(it.valor)}</b></span>
           ${it.local ? html`<span class="text-muted">${it.local}</span>` : null}<span class=${"chip " + CHIP_STATUS[statusItem(it)]}>${statusItem(it) === "Baixo" ? "Estoque baixo" : statusItem(it)}</span></div>` : null}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <${Campo} id="mv-qtd" rotulo=${"Quantidade" + (it ? ` (${it.unidade})` : "")} erro=${(tocado || (sai && it && q > it.qtd)) && erros.qtd}>
-            <input id="mv-qtd" class="inp num" inputMode="decimal" value=${f.qtd} onInput=${set("qtd")} aria-invalid=${!!((tocado || (sai && it && q > it.qtd)) && erros.qtd)} /><//>
+            <${Quantidade} id="mv-qtd" valor=${f.qtd} onMudar=${(v) => setF({ ...f, qtd: v })} invalido=${!!((tocado || (sai && it && q > it.qtd)) && erros.qtd)} /><//>
           <div class="field"><span class="lbl">Valor movimentado</span><div class="inp num font-semibold" style=${{ background: "rgb(var(--surface2))" }}>${brl(it && q > 0 ? q * (precoNovo ?? it.valor) : 0)}</div></div>
         </div>
-        <${Campo} id="mv-lote" rotulo="Serial / lote (opcional)" erro=${erros.lote} dica=${sai && seriaisItem.length ? `${seriaisItem.length} serial(is) em estoque. Vários: separe por vírgula.` : "Vários: separe por vírgula; vira uma linha por serial na planilha."}>
+        ${sai ? html`<${EscolherSeriais} seriais=${seriaisItem} valor=${f.lote} onMudar=${(v, n) => setF({ ...f, lote: v, qtd: String(n || 1) })} />` : null}
+        <${Campo} id="mv-lote" rotulo=${sai && seriaisItem.length ? "Ou digite o serial / lote" : "Serial / lote (opcional)"} erro=${erros.lote} dica=${sai && seriaisItem.length ? `${seriaisItem.length} serial(is) em estoque. Vários: separe por vírgula.` : "Vários: separe por vírgula; vira uma linha por serial na planilha."}>
           <input id="mv-lote" class="inp font-mono" list="lista-seriais" value=${f.lote} onInput=${set("lote")} placeholder="Y522HX5T901285D" aria-invalid=${!!erros.lote} />
           <datalist id="lista-seriais">${(sai ? seriaisItem : []).map((x) => html`<option key=${x} value=${x} />`)}</datalist><//>
         ${sai ? html`
@@ -1918,7 +1986,7 @@ function Movimentar({ db, mudar, destinos, preMov, setPreMov, irPara }) {
           </div>
           ${precoNovo != null ? html`<p class="m-0 text-sm">Valor unitário passa de <b class="num">${brl(it.valor)}</b> para <b class="num">${brl(precoNovo)}</b>.</p>` : null}`}
       </div>
-      <div class="px-5 py-3 border-t border-line bg-surface2 flex justify-end">
+      <div class="px-5 py-3 border-t border-line bg-surface2 flex justify-end acao-fixa">
         <button class=${"btn w-full sm:w-auto " + (sai ? "btn-out" : "btn-in")} disabled=${tocado && !ok}><${Ic} n=${sai ? "ArrowUpFromLine" : "ArrowDownToLine"} size=${17} /> Registrar ${sai ? "saída" : "entrada"}</button>
       </div>
     </form>
@@ -2052,14 +2120,13 @@ function Descartes({ db, mudar, setConfirmar }) {
         ${[["estoque", "Do estoque"], ["fora", "Fora do estoque"]].map(([k, t]) => html`<button type="button" key=${k} aria-pressed=${f.modo === k} onClick=${() => { setF({ ...f, modo: k }); setTocado(false); }}
           class=${"py-2.5 rounded-lg font-display font-bold uppercase tracking-wider " + (f.modo === k ? "btn-out" : "bg-transparent text-muted hover:text-ink")} style=${{ border: 0 }}>${t}</button>`)}</div></div>
       <div class="p-5 flex flex-col gap-4">
-        ${estoque ? html`<${Campo} id="ds-item" rotulo="Item" erro=${tocado && erros.item}>
-          <select id="ds-item" class="inp" value=${f.itemId} onChange=${set("itemId")}><option value="">Escolha o item…</option>
-            ${porItem.map(([c, its]) => html`<optgroup key=${c} label=${c}>${its.map((i) => html`<option key=${i.id} value=${i.id}>${i.sku} · ${i.nome} — saldo ${qtdFmt(i.qtd)}${i.local ? " · " + i.local : ""}</option>`)}</optgroup>`)}</select><//>`
+        ${estoque ? html`<${EscolherItem} id="ds-item" itens=${db.itens} valor=${f.itemId} onEscolher=${(id) => setF({ ...f, itemId: id, seriais: "" })} erro=${tocado && erros.item} soComSaldo=${true} />`
         : html`<${Campo} id="ds-mat" rotulo="Material" erro=${tocado && erros.material}><input id="ds-mat" class="inp" value=${f.material} onInput=${set("material")} placeholder="Fontes queimadas" /><//>`}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <${Campo} id="ds-qtd" rotulo="Quantidade" erro=${(tocado || (it && q > it.qtd)) && erros.qtd}><input id="ds-qtd" class="inp num" inputMode="decimal" value=${f.qtd} onInput=${set("qtd")} /><//>
+          <${Campo} id="ds-qtd" rotulo="Quantidade" erro=${(tocado || (it && q > it.qtd)) && erros.qtd}><${Quantidade} id="ds-qtd" valor=${f.qtd} onMudar=${(v) => setF({ ...f, qtd: v })} /><//>
           <${Campo} id="ds-data" rotulo="Data"><input id="ds-data" class="inp" type="date" value=${f.data} onInput=${set("data")} /><//>
         </div>
+        ${it ? html`<${EscolherSeriais} seriais=${it.seriais || []} valor=${f.seriais} onMudar=${(v, n) => setF({ ...f, seriais: v, qtd: String(n || 1) })} />` : null}
         <${Campo} id="ds-ser" rotulo="Serial / lote (opcional)" dica="Vários: separe por vírgula.">
           <input id="ds-ser" class="inp font-mono" list="ds-lista-ser" value=${f.seriais} onInput=${set("seriais")} />
           <datalist id="ds-lista-ser">${(it ? it.seriais || [] : []).map((x) => html`<option key=${x} value=${x} />`)}</datalist><//>
@@ -2072,7 +2139,7 @@ function Descartes({ db, mudar, setConfirmar }) {
           <${Campo} id="ds-obs" rotulo="Observação"><input id="ds-obs" class="inp" value=${f.obs} onInput=${set("obs")} /><//>
         </div>
       </div>
-      <div class="px-5 py-3 border-t border-line bg-surface2 flex justify-end"><button class="btn btn-out w-full sm:w-auto" disabled=${tocado && !ok}><${Ic} n="Recycle" size=${17} /> Registrar descarte</button></div>
+      <div class="px-5 py-3 border-t border-line bg-surface2 flex justify-end acao-fixa"><button class="btn btn-out w-full sm:w-auto" disabled=${tocado && !ok}><${Ic} n="Recycle" size=${17} /> Registrar descarte</button></div>
     </form>
     <section class="card overflow-hidden">
       <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-line"><h3 class="font-display text-lg font-bold uppercase tracking-wide m-0">${(db.descartes || []).length} descarte(s)</h3>
